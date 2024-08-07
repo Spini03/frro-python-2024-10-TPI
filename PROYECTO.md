@@ -1,4 +1,4 @@
-# NOMBRE_DEL_PROYECTO
+# WallCalculate (Calculer le mur)
 
 Este es un archivo que debe completarse con los datos utilizados en el TPI. Este archivo puede modificarse en el tiempo, no obstante siempre debe mantenerse en un estado consistente con el desarrollo.
 
@@ -6,7 +6,7 @@ Este es un archivo que debe completarse con los datos utilizados en el TPI. Este
 
 ## Descripción del proyecto
 
-Definir cúal es el alcance de este proyecto y los principales objetivos que debe cumplir.
+El proyecto tiene como objetivo desarrollar una aplicación que permita calcular los costos para construir una pared con medidas específicas. La aplicación proporcionará información detallada sobre la cantidad de materiales necesarios y los costos aproximados involucrados. Para obtener las medidas se utilizará la librería OpenCV. Además, la aplicación permitirá a los usuarios ver y analizar todas las mediciones históricas realizadas. Los datos sobre materiales y precios se gestionarán utilizando la librería Pandas.
 
 ## Modelo de Dominio
 
@@ -75,7 +75,9 @@ Listado y descripción breve de los requerimientos no funcionales. Utilizar las 
 
 ## Stack Tecnológico
 
-Definir que tecnologías se van a utilizar en cada capa y una breve descripción sobre por qué se escogió esa tecnologia.
+Se van a usar las tecnologías OpenCV, Pandas.
+OpenCV porque nos permite obtener las dimensiones precisas de la pared mediante una cámara.
+Pandas porque nos permite gestionar y analizar los datos de materiales y precios de una fuente externa.
 
 ### Capa de Datos
 
