@@ -1,13 +1,14 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from werkzeug.security import generate_password_hash, check_password_hash
 import cv2
 import numpy as np
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
-from flask import render_template
+from flask import render_template, session
+from flask_migrate import Migrate
+from functools import wraps
+
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'tu_clave_secreta_muy_segura'
@@ -15,23 +16,16 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://soporte:s0p0rte123*@localhost/t
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
-login_manager = LoginManager(app)
-login_manager.login_view = 'login'
 
 # Modelos de base de datos
 
-class Usuario(UserMixin, db.Model):
+class Usuario(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nombre = db.Column(db.String(255), nullable=False)
     mail = db.Column(db.String(255), unique=True, nullable=False)
-    contraseña_hash = db.Column(db.String(255), nullable=False)
+    contraseña = db.Column(db.String(255), nullable=False) 
     proyectos = db.relationship('Proyecto', backref='usuario', lazy=True)
 
-    def set_password(self, password):
-        self.contraseña_hash = generate_password_hash(password)
-
-    def check_password(self, password):
-        return check_password_hash(self.contraseña_hash, password)
 
 class Proyecto(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -62,12 +56,20 @@ class HistorialMediciones(db.Model):
     costoTotal = db.Column(db.Float, nullable=False)
     id_pared = db.Column(db.Integer, db.ForeignKey('pared.id'), nullable=False)
 
-@login_manager.user_loader
-def load_user(user_id):
-    return Usuario.query.get(int(user_id))
+
 
 # Funciones auxiliares
 
+from flask_migrate import Migrate  
+migrate = Migrate(app, db)         
+
+def requiere_login(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'usuario_id' not in session:
+            return redirect(url_for('login'))  # Redirecciona a login si no ha iniciado sesión
+        return f(*args, **kwargs)
+    return decorated_function
 
 def medir_pared(image):
     # Aquí implementarías la lógica para medir la pared usando OpenCV
@@ -96,10 +98,9 @@ def scrape_material_prices():
 # Rutas
 
 @app.route('/')
+@requiere_login
 def home():
-    proyectos = []
-    if current_user.is_authenticated:
-        proyectos = Proyecto.query.filter_by(id_usuario=current_user.id).all()
+    proyectos = Proyecto.query.all()  # Mostrar todos los proyectos
     return render_template('home.html', proyectos=proyectos)
 
 @app.route('/registro', methods=['GET', 'POST'])
@@ -108,21 +109,20 @@ def registro():
         nombre = request.form['nombre']
         mail = request.form['mail']
         password = request.form['password']
-        
+
         usuario_existente = Usuario.query.filter_by(mail=mail).first()
         if usuario_existente:
             flash('El correo electrónico ya está registrado')
             return redirect(url_for('registro'))
-        
-        nuevo_usuario = Usuario(nombre=nombre, mail=mail)
-        nuevo_usuario.set_password(password)
-        
+
+        nuevo_usuario = Usuario(nombre=nombre, mail=mail, contraseña=password) 
+
         db.session.add(nuevo_usuario)
         db.session.commit()
-        
-        flash('Registro exitoso. Por favor, inicia sesión.')
+
+        flash('Registro exitoso.')
         return redirect(url_for('login'))
-    
+
     return render_template('registro.html')
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -130,31 +130,34 @@ def login():
     if request.method == 'POST':
         mail = request.form['mail']
         password = request.form['password']
-        user = Usuario.query.filter_by(mail=mail).first()
-        if user and user.check_password(password):
-            login_user(user)
+
+        usuario = Usuario.query.filter_by(mail=mail).first()
+        if usuario and usuario.contraseña == password:
+            session['usuario_id'] = usuario.id  # Guarda el ID del usuario en la sesión
+            flash('Inicio de sesión exitoso.')
             return redirect(url_for('dashboard'))
         flash('Credenciales inválidas')
     return render_template('login.html')
 
 @app.route('/logout')
-@login_required
+@requiere_login
 def logout():
-    logout_user()
+    session.pop('usuario_id', None)  # Elimina el ID del usuario de la sesión
+    flash('Sesión cerrada.')
     return redirect(url_for('home'))
 
 @app.route('/dashboard')
-@login_required
+@requiere_login
 def dashboard():
-    proyectos = current_user.proyectos
+    proyectos = Proyecto.query.all()  # Mostrar todos los proyectos
     return render_template('dashboard.html', proyectos=proyectos)
 
 @app.route('/proyecto/nuevo', methods=['GET', 'POST'])
-@login_required
+@requiere_login
 def nuevo_proyecto():
     if request.method == 'POST':
         nombre = request.form['nombre']
-        nuevo_proyecto = Proyecto(nombre=nombre, id_usuario=current_user.id)
+        nuevo_proyecto = Proyecto(nombre=nombre, id_usuario=1)  # Asumiendo un usuario por defecto
         db.session.add(nuevo_proyecto)
         db.session.commit()
         flash('Proyecto creado exitosamente')
@@ -162,21 +165,15 @@ def nuevo_proyecto():
     return render_template('nuevo_proyecto.html')
 
 @app.route('/proyecto/<int:proyecto_id>')
-@login_required
+@requiere_login
 def ver_proyecto(proyecto_id):
     proyecto = Proyecto.query.get_or_404(proyecto_id)
-    if proyecto.id_usuario != current_user.id:
-        flash('No tienes permiso para ver este proyecto')
-        return redirect(url_for('dashboard'))
     return render_template('ver_proyecto.html', proyecto=proyecto)
 
 @app.route('/pared/nueva/<int:proyecto_id>', methods=['GET', 'POST'])
-@login_required
+@requiere_login
 def nueva_pared(proyecto_id):
     proyecto = Proyecto.query.get_or_404(proyecto_id)
-    if proyecto.id_usuario != current_user.id:
-        flash('No tienes permiso para modificar este proyecto')
-        return redirect(url_for('dashboard'))
     
     if request.method == 'POST':
         file = request.files['image']
@@ -196,7 +193,7 @@ def nueva_pared(proyecto_id):
     return render_template('nueva_pared.html', proyecto_id=proyecto_id, materiales=materiales)
 
 @app.route('/actualizar_precios')
-@login_required
+@requiere_login
 def actualizar_precios():
     precios = scrape_material_prices()
     for nombre, precio in precios.items():
@@ -208,7 +205,7 @@ def actualizar_precios():
     return redirect(url_for('dashboard'))
 
 @app.route('/comparar_paredes', methods=['GET', 'POST'])
-@login_required
+@requiere_login
 def comparar_paredes():
     if request.method == 'POST':
         pared_ids = request.form.getlist('pared_ids')
@@ -227,8 +224,9 @@ def comparar_paredes():
         
         return render_template('resultados_comparacion.html', comparacion=comparacion)
     
-    proyectos = current_user.proyectos
+    proyectos = Proyecto.query.all()  # Mostrar todos los proyectos
     return render_template('seleccionar_paredes.html', proyectos=proyectos)
+
 
 if __name__ == '__main__':
     app.run(debug=True)
