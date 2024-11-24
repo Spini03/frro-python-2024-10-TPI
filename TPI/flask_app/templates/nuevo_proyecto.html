@@ -19,7 +19,7 @@
 
     <div class="container mt-4">
         <h1 class="mb-4">Crear Nuevo Proyecto</h1>
-        
+       
         {% with messages = get_flashed_messages() %}
             {% if messages %}
                 {% for message in messages %}
@@ -28,7 +28,7 @@
             {% endif %}
         {% endwith %}
 
-        <form method="POST">
+        <form action="{{ url_for('nuevo_proyecto') }}" method="POST">
             <div class="mb-3">
                 <label for="nombre" class="form-label">Nombre del Proyecto</label>
                 <input type="text" class="form-control" id="nombre" name="nombre" required>

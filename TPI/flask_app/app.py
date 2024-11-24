@@ -157,11 +157,23 @@ def dashboard():
 def nuevo_proyecto():
     if request.method == 'POST':
         nombre = request.form['nombre']
-        nuevo_proyecto = Proyecto(nombre=nombre, id_usuario=1)  # Asumiendo un usuario por defecto
-        db.session.add(nuevo_proyecto)
-        db.session.commit()
-        flash('Proyecto creado exitosamente')
-        return redirect(url_for('dashboard'))
+        usuario_id = session.get('usuario_id')
+        
+        nuevo_proyecto = Proyecto(
+            nombre=nombre,
+            id_usuario=usuario_id
+        )
+        
+        try:
+            db.session.add(nuevo_proyecto)
+            db.session.commit()
+            flash('Proyecto creado exitosamente')
+            return redirect(url_for('dashboard'))
+        except Exception as e:
+            db.session.rollback()
+            flash('Error al crear el proyecto: ' + str(e))
+            return redirect(url_for('nuevo_proyecto'))
+            
     return render_template('nuevo_proyecto.html')
 
 @app.route('/proyecto/<int:proyecto_id>')

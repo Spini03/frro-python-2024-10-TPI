@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nuevo Proyecto - CostBuilder</title>
+    <title>Dashboard - CostBuilder</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
@@ -18,7 +18,7 @@
     </nav>
 
     <div class="container mt-4">
-        <h1 class="mb-4">Crear Nuevo Proyecto</h1>
+        <h1 class="mb-4">Dashboard</h1>
         
         {% with messages = get_flashed_messages() %}
             {% if messages %}
@@ -28,13 +28,28 @@
             {% endif %}
         {% endwith %}
 
-        <form method="POST">
-            <div class="mb-3">
-                <label for="nombre" class="form-label">Nombre del Proyecto</label>
-                <input type="text" class="form-control" id="nombre" name="nombre" required>
+        <div class="row mb-4">
+            <div class="col">
+                <a href="{{ url_for('nuevo_proyecto') }}" class="btn btn-success">Crear Nuevo Proyecto</a>
             </div>
-            <button type="submit" class="btn btn-success">Crear Proyecto</button>
-        </form>
+        </div>
+
+        <h2>Mis Proyectos</h2>
+        <div class="list-group">
+            {% for proyecto in proyectos %}
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="mb-1">{{ proyecto.nombre }}</h5>
+                        <small class="text-muted">Creado el: {{ proyecto.fecha_creacion.strftime('%d/%m/%Y') }}</small>
+                    </div>
+                    <div>
+                        <a href="{{ url_for('ver_proyecto', proyecto_id=proyecto.id) }}" class="btn btn-primary btn-sm">Ver Detalles</a>
+                    </div>
+                </div>
+            {% else %}
+                <div class="list-group-item">No hay proyectos aún.</div>
+            {% endfor %}
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
