@@ -1,3 +1,4 @@
+import base64
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
 import cv2
@@ -8,7 +9,6 @@ from datetime import datetime
 from flask import render_template, session
 from flask_migrate import Migrate
 from functools import wraps
-
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'tu_clave_secreta_muy_segura'
@@ -26,13 +26,12 @@ class Usuario(db.Model):
     contraseña = db.Column(db.String(255), nullable=False) 
     proyectos = db.relationship('Proyecto', backref='usuario', lazy=True)
 
-
 class Proyecto(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nombre = db.Column(db.String(255), nullable=False)
     fecha_creacion = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     id_usuario = db.Column(db.Integer, db.ForeignKey('usuario.id'), nullable=False)
-    paredes = db.relationship('Pared', backref='proyecto', lazy=True)
+    paredes = db.relationship('Pared', backref='proyecto', lazy=True, cascade="all, delete")
 
 class Material(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -43,6 +42,7 @@ class Pared(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     altura = db.Column(db.Float, nullable=False)
     ancho = db.Column(db.Float, nullable=False)
+    profundidad = db.Column(db.Float, nullable=False)  # Nuevo campo
     id_proyecto = db.Column(db.Integer, db.ForeignKey('proyecto.id'), nullable=False)
     id_material = db.Column(db.Integer, db.ForeignKey('material.id'), nullable=False)
     material = db.relationship('Material', backref='paredes')
@@ -53,10 +53,11 @@ class HistorialMediciones(db.Model):
     fechaHora = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     altura = db.Column(db.Float, nullable=False)
     ancho = db.Column(db.Float, nullable=False)
+    profundidad = db.Column(db.Float, nullable=False)  
     costoTotal = db.Column(db.Float, nullable=False)
     id_pared = db.Column(db.Integer, db.ForeignKey('pared.id'), nullable=False)
-
-
+    material_id = db.Column(db.Integer, db.ForeignKey('material.id'), nullable=False)
+    material = db.relationship('Material', backref='mediciones')
 
 # Funciones auxiliares
 
@@ -70,6 +71,25 @@ def requiere_login(f):
             return redirect(url_for('login'))  # Redirecciona a login si no ha iniciado sesión
         return f(*args, **kwargs)
     return decorated_function
+
+@app.after_request
+def add_header(response):
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+@app.route('/test_delete/<int:proyecto_id>')
+def test_delete(proyecto_id):
+    proyecto = Proyecto.query.get(proyecto_id)
+    if not proyecto:
+        return "Proyecto no encontrado"
+    try:
+        db.session.delete(proyecto)
+        db.session.commit()
+        return "Proyecto eliminado exitosamente"
+    except Exception as e:
+        return f"Error eliminando proyecto: {e}"
 
 def medir_pared(image):
     # Aquí implementarías la lógica para medir la pared usando OpenCV
@@ -95,13 +115,35 @@ def scrape_material_prices():
 
     return precios
 
+def actualizar_precios_materiales():
+    # Ejemplo de scraping de precios
+    urls = {
+        'ladrillos': 'https://ejemplo.com/precios-ladrillos',
+        'cemento': 'https://ejemplo.com/precios-cemento',
+        # etc
+    }
+    
+    for material_tipo, url in urls.items():
+        try:
+            response = requests.get(url)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            precio = soup.find('span', class_='precio').text
+            
+            material = Material.query.filter_by(nombre=material_tipo).first()
+            if material:
+                material.precioPorUnidad = float(precio)
+                db.session.commit()
+        except Exception as e:
+            print(f"Error actualizando precio de {material_tipo}: {str(e)}")
+
 # Rutas
 
 @app.route('/')
 @requiere_login
 def home():
-    proyectos = Proyecto.query.all()  # Mostrar todos los proyectos
-    return render_template('home.html', proyectos=proyectos)
+    if 'usuario_id' in session:
+        return redirect(url_for('dashboard'))  # Si está autenticado, redirige al dashboard
+    return redirect(url_for('login'))
 
 @app.route('/registro', methods=['GET', 'POST'])
 def registro():
@@ -144,13 +186,42 @@ def login():
 def logout():
     session.pop('usuario_id', None)  # Elimina el ID del usuario de la sesión
     flash('Sesión cerrada.')
-    return redirect(url_for('home'))
+    return redirect(url_for('login'))
 
 @app.route('/dashboard')
 @requiere_login
 def dashboard():
-    proyectos = Proyecto.query.all()  # Mostrar todos los proyectos
+    if 'usuario_id' not in session:
+        print("El usuario no está autenticado.")
+        return redirect(url_for('login'))  # Redirige al login si no está autenticado
+    proyectos = Proyecto.query.filter_by(id_usuario=session['usuario_id']).all()
     return render_template('dashboard.html', proyectos=proyectos)
+
+@app.route('/proyecto/<int:proyecto_id>/eliminar', methods=['POST'])
+@requiere_login
+def eliminar_proyecto(proyecto_id):
+    print(f"Solicitud POST recibida para eliminar proyecto con ID: {proyecto_id}")
+    proyecto = Proyecto.query.get_or_404(proyecto_id)
+
+    if 'usuario_id' not in session:
+        print("El usuario no está autenticado.")
+        return redirect(url_for('login'))
+
+    if proyecto.id_usuario != session['usuario_id']:
+        print(f"Usuario {session['usuario_id']} no tiene permiso para eliminar proyecto {proyecto_id}")
+        flash('No tienes permiso para eliminar este proyecto.')
+        return redirect(url_for('dashboard'))
+
+    try:
+        db.session.delete(proyecto)
+        db.session.commit()
+        flash('Proyecto eliminado exitosamente.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error al eliminar proyecto: {e}")  # Para depurar el error
+        flash('Error al eliminar el proyecto: ' + str(e))
+
+    return redirect(url_for('dashboard'))
 
 @app.route('/proyecto/nuevo', methods=['GET', 'POST'])
 @requiere_login
@@ -180,65 +251,85 @@ def nuevo_proyecto():
 @requiere_login
 def ver_proyecto(proyecto_id):
     proyecto = Proyecto.query.get_or_404(proyecto_id)
-    return render_template('ver_proyecto.html', proyecto=proyecto)
+    materiales = Material.query.all()
+    
+    # Obtener las mediciones asociadas a las paredes del proyecto
+    mediciones = []
+    for pared in proyecto.paredes:
+        mediciones.extend(pared.mediciones)
+    
+    return render_template('proyecto_detalle.html', proyecto=proyecto, materiales=materiales, mediciones=mediciones)
 
-@app.route('/pared/nueva/<int:proyecto_id>', methods=['GET', 'POST'])
+@app.route('/proyecto/<int:proyecto_id>/process_image', methods=['POST'])
 @requiere_login
-def nueva_pared(proyecto_id):
+def process_image(proyecto_id):
+    data = request.get_json()
+    imageData = data['imageData']
+    measurementType = data['measurementType']
+
+    # Decode base64 image data
+    image_data = imageData.split(',')[1]
+    binary_data = base64.b64decode(image_data)
+    image_array = np.frombuffer(binary_data, dtype=np.uint8)
+    img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+
+    # Perform measurement calculations using OpenCV
+    # For example, detect lines or calculate distances based on user markings
+    # measurement = calculate_measurement(img, measurementType)
+
+    # Placeholder value
+    measurement = 3.0  # Replace with actual measurement
+
+    print('Measurement:', measurement) 
+    return jsonify({'measurement': measurement})
+
+@app.route('/proyecto/<int:proyecto_id>/guardar_mediciones', methods=['POST'])
+@requiere_login
+def guardar_mediciones(proyecto_id):
     proyecto = Proyecto.query.get_or_404(proyecto_id)
     
-    if request.method == 'POST':
-        file = request.files['image']
-        id_material = request.form['material']
+    print(request.form)  # Imprime los datos del formulario en la consola
+    
+    try:
+        ancho = float(request.form['ancho'])
+        alto = float(request.form['alto'])
+        profundidad = float(request.form['profundidad'])
+        material_id = int(request.form['material'])
         
-        image = cv2.imdecode(np.frombuffer(file.read(), np.uint8), cv2.IMREAD_UNCHANGED)
-        altura, ancho = medir_pared(image)
+        material = Material.query.get_or_404(material_id)
         
-        nueva_pared = Pared(altura=altura, ancho=ancho, id_proyecto=proyecto_id, id_material=id_material)
+        # Crear una nueva pared
+        nueva_pared = Pared(
+            altura=alto,
+            ancho=ancho,
+            profundidad=profundidad,  # Asegúrate de que este campo exista en la tabla Pared
+            id_proyecto=proyecto_id,
+            id_material=material_id
+        )
+        
         db.session.add(nueva_pared)
+        db.session.flush()  # Flush para obtener el ID de la nueva pared
+        
+        # Calcular costo total
+        area_total = ancho * alto * 2 + ancho * profundidad * 2  # Área total de la pared
+        costo_total = area_total * material.precioPorUnidad
+        
+        # Crear una nueva medición asociada a la nueva pared
+        nueva_medicion = HistorialMediciones(
+            altura=alto,
+            ancho=ancho,
+            profundidad=profundidad,
+            costoTotal=costo_total,
+            id_pared=nueva_pared.id,
+            material_id=material_id
+        )
+        
+        db.session.add(nueva_medicion)
         db.session.commit()
-        
-        flash('Pared añadida exitosamente')
-        return redirect(url_for('ver_proyecto', proyecto_id=proyecto_id))
+        flash('Mediciones guardadas exitosamente')
+    except Exception as e:
+        db.session.rollback()
+        flash('Error al guardar las mediciones: ' + str(e))
     
-    materiales = Material.query.all()
-    return render_template('nueva_pared.html', proyecto_id=proyecto_id, materiales=materiales)
-
-@app.route('/actualizar_precios')
-@requiere_login
-def actualizar_precios():
-    precios = scrape_material_prices()
-    for nombre, precio in precios.items():
-        material = Material.query.filter_by(nombre=nombre).first()
-        if material:
-            material.precioPorUnidad = precio
-    db.session.commit()
-    flash('Precios de materiales actualizados')
-    return redirect(url_for('dashboard'))
-
-@app.route('/comparar_paredes', methods=['GET', 'POST'])
-@requiere_login
-def comparar_paredes():
-    if request.method == 'POST':
-        pared_ids = request.form.getlist('pared_ids')
-        paredes = Pared.query.filter(Pared.id.in_(pared_ids)).all()
-        
-        comparacion = []
-        for pared in paredes:
-            costo = pared.altura * pared.ancho * pared.material.precioPorUnidad
-            comparacion.append({
-                'id': pared.id,
-                'altura': pared.altura,
-                'ancho': pared.ancho,
-                'material': pared.material.nombre,
-                'costo': costo
-            })
-        
-        return render_template('resultados_comparacion.html', comparacion=comparacion)
-    
-    proyectos = Proyecto.query.all()  # Mostrar todos los proyectos
-    return render_template('seleccionar_paredes.html', proyectos=proyectos)
-
-
-if __name__ == '__main__':
-    app.run(debug=True)
+    print("Redirigiendo a ver_proyecto")  # Imprime un mensaje en la consola
+    return redirect(url_for('ver_proyecto', proyecto_id=proyecto_id))

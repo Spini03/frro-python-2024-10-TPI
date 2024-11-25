@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ proyecto.nombre }} - CostBuilder</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        #videoElement {
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto;
+            display: none;
+        }
+        .ruler {
+            position: absolute;
+            background-color: rgba(255, 255, 0, 0.5);
+            pointer-events: none;
+        }
+        .ruler-horizontal {
+            height: 2px;
+            width: 100%;
+        }
+        .ruler-vertical {
+            width: 2px;
+            height: 100%;
+        }
+        #measurementControls {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('home') }}">CostBuilder</a>
+            <div class="navbar-nav">
+                <a class="nav-item nav-link" href="{{ url_for('dashboard') }}">Dashboard</a>
+                <a class="nav-item nav-link" href="{{ url_for('logout') }}">Cerrar sesión</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <h1 class="mb-4">{{ proyecto.nombre }}</h1>
+        
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-info">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="row mb-4">
+            <div class="col">
+                <button id="startMeasurement" class="btn btn-primary">Tomar Mediciones</button>
+            </div>
+        </div>
+
+        <div id="measurementArea" class="position-relative" style="display: none;">
+            <video id="videoElement" autoplay></video>
+            <div id="ruler" class="ruler ruler-horizontal"></div>
+            
+            <div id="measurementControls" class="mt-3">
+                <p id="measurementInstructions" class="mb-3">
+                    Alinee la regla horizontal con el ancho de la pared
+                </p>
+                <button id="captureWidth" class="btn btn-success">Capturar Ancho</button>
+                <button id="captureHeight" class="btn btn-success" style="display: none;">Capturar Alto</button>
+            </div>
+
+            <div id="measurementForm" class="mt-4" style="display: none;">
+                <h3>Medidas Capturadas</h3>
+                <p>Ancho: <span id="widthValue">0</span> metros</p>
+                <p>Alto: <span id="heightValue">0</span> metros</p>
+                
+                <form action="{{ url_for('guardar_mediciones', proyecto_id=proyecto.id) }}" method="POST">
+                    <input type="hidden" name="ancho" id="anchoInput">
+                    <input type="hidden" name="alto" id="altoInput">
+                    
+                    <div class="mb-3">
+                        <label for="profundidad" class="form-label">Profundidad (metros)</label>
+                        <input type="number" step="0.01" class="form-control" id="profundidad" name="profundidad" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="material" class="form-label">Material</label>
+                        <select class="form-control" id="material" name="material" required>
+                            {% for material in materiales %}
+                            <option value="{{ material.id }}">{{ material.nombre }} - ${{ material.precioPorUnidad }}/m²</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Calcular Costo</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Historial de mediciones -->
+        <div class="mt-4">
+            <h3>Mediciones Anteriores</h3>
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Ancho</th>
+                            <th>Alto</th>
+                            <th>Profundidad</th>
+                            <th>Material</th>
+                            <th>Costo Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for medicion in proyecto.mediciones %}
+                        <tr>
+                            <td>{{ medicion.fechaHora.strftime('%d/%m/%Y %H:%M') }}</td>
+                            <td>{{ medicion.ancho }} m</td>
+                            <td>{{ medicion.alto }} m</td>
+                            <td>{{ medicion.profundidad }} m</td>
+                            <td>{{ medicion.material.nombre }}</td>
+                            <td>${{ medicion.costoTotal }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const startMeasurementBtn = document.getElementById('startMeasurement');
+        const measurementArea = document.getElementById('measurementArea');
+        const video = document.getElementById('videoElement');
+        const ruler = document.getElementById('ruler');
+        const captureWidthBtn = document.getElementById('captureWidth');
+        const captureHeightBtn = document.getElementById('captureHeight');
+        const measurementForm = document.getElementById('measurementForm');
+        const measurementInstructions = document.getElementById('measurementInstructions');
+        const widthValue = document.getElementById('widthValue');
+        const heightValue = document.getElementById('heightValue');
+        const anchoInput = document.getElementById('anchoInput');
+        const altoInput = document.getElementById('altoInput');
+
+        let currentMode = 'width';
+        
+        startMeasurementBtn.addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                measurementArea.style.display = 'block';
+                video.style.display = 'block';
+                document.getElementById('measurementControls').style.display = 'block';
+                startMeasurementBtn.style.display = 'none';
+            } catch (err) {
+                console.error('Error accessing camera:', err);
+                alert('Error al acceder a la cámara. Asegúrese de dar permisos.');
+            }
+        });
+
+        captureWidthBtn.addEventListener('click', () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Convert canvas to base64 image
+            const imageData = canvas.toDataURL('image/png');
+
+            // Send image data to the server
+            fetch('/proyecto/{{ proyecto.id }}/process_image', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ imageData: imageData, measurementType: 'width' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Response from server:', data);
+                widthValue.textContent = data.measurement;
+                anchoInput.value = data.measurement;
+                // Proceed to capture height
+                currentMode = 'height';
+                ruler.classList.remove('ruler-horizontal');
+                ruler.classList.add('ruler-vertical');
+                measurementInstructions.textContent = 'Alinee la regla vertical con el alto de la pared';
+                captureWidthBtn.style.display = 'none';
+                captureHeightBtn.style.display = 'block';
+            })
+            .catch(error => console.error('Error:', error));
+        });
+
+        captureHeightBtn.addEventListener('click', () => {
+            const height = calculateMeasurement(); // Implementar esta función
+            heightValue.textContent = height;
+            altoInput.value = height;
+            
+            // Mostrar formulario de mediciones
+            measurementForm.style.display = 'block';
+            video.style.display = 'none';
+            ruler.style.display = 'none';
+            captureHeightBtn.style.display = 'none';
+            measurementInstructions.style.display = 'none';
+        });
+
+        function calculateMeasurement() {
+            // Esta función implementará la lógica de OpenCV para calcular las medidas
+            // Por ahora, retornamos un valor de ejemplo
+            return (Math.random() * 3 + 1).toFixed(2);
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

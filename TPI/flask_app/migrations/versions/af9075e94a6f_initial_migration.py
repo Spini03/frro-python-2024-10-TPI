@@ -144,7 +144,7 @@ def downgrade():
                type_=mysql.VARCHAR(length=25),
                existing_nullable=False)
 
-    op.create_table('proveedormaterial',
+    op.create_tableif_not_exists('proveedormaterial',
     sa.Column('id_proveedor', mysql.INTEGER(), autoincrement=False, nullable=False),
     sa.Column('id_material', mysql.INTEGER(), autoincrement=False, nullable=False),
     sa.ForeignKeyConstraint(['id_material'], ['material.id'], name='proveedormaterial_ibfk_2', ondelete='RESTRICT'),
@@ -154,7 +154,7 @@ def downgrade():
     mysql_default_charset='utf8mb4',
     mysql_engine='InnoDB'
     )
-    op.create_table('historialmediciones',
+    op.create_tableif_not_exists('historialmediciones',
     sa.Column('id', mysql.INTEGER(), autoincrement=True, nullable=False),
     sa.Column('fechaHora', mysql.DATETIME(), nullable=False),
     sa.Column('altura', mysql.FLOAT(), nullable=False),
