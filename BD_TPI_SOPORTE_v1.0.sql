@@ -18,6 +18,29 @@ USE `tpi_soporte`;
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
 --
+-- Table structure for table `alembic_version`
+--
+
+DROP TABLE IF EXISTS `alembic_version`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `alembic_version` (
+  `version_num` varchar(32) NOT NULL,
+  PRIMARY KEY (`version_num`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `alembic_version`
+--
+
+LOCK TABLES `alembic_version` WRITE;
+/*!40000 ALTER TABLE `alembic_version` DISABLE KEYS */;
+INSERT INTO `alembic_version` VALUES ('629cda41d611');
+/*!40000 ALTER TABLE `alembic_version` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
 -- Table structure for table `historial_mediciones`
 --
 
@@ -29,15 +52,16 @@ CREATE TABLE `historial_mediciones` (
   `fechaHora` datetime NOT NULL,
   `altura` float NOT NULL,
   `ancho` float NOT NULL,
+  `profundidad` float NOT NULL,
   `costoTotal` float NOT NULL,
   `id_pared` int NOT NULL,
-  `id_material` int NOT NULL,
+  `material_id` int NOT NULL,
   PRIMARY KEY (`id`),
-  KEY `id_material` (`id_material`),
   KEY `id_pared` (`id_pared`),
-  CONSTRAINT `historial_mediciones_ibfk_1` FOREIGN KEY (`id_material`) REFERENCES `material` (`id`),
-  CONSTRAINT `historial_mediciones_ibfk_2` FOREIGN KEY (`id_pared`) REFERENCES `pared` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+  KEY `material_id` (`material_id`),
+  CONSTRAINT `historial_mediciones_ibfk_1` FOREIGN KEY (`id_pared`) REFERENCES `pared` (`id`),
+  CONSTRAINT `historial_mediciones_ibfk_2` FOREIGN KEY (`material_id`) REFERENCES `material` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -46,6 +70,7 @@ CREATE TABLE `historial_mediciones` (
 
 LOCK TABLES `historial_mediciones` WRITE;
 /*!40000 ALTER TABLE `historial_mediciones` DISABLE KEYS */;
+INSERT INTO `historial_mediciones` VALUES (2,'2024-11-25 22:12:59',1.7,3,1,3240,1,1),(3,'2024-11-25 22:21:12',3.17,3,1,5004,2,1);
 /*!40000 ALTER TABLE `historial_mediciones` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -61,7 +86,7 @@ CREATE TABLE `material` (
   `nombre` varchar(255) NOT NULL,
   `precioPorUnidad` float NOT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -70,6 +95,7 @@ CREATE TABLE `material` (
 
 LOCK TABLES `material` WRITE;
 /*!40000 ALTER TABLE `material` DISABLE KEYS */;
+INSERT INTO `material` VALUES (1,'Ladrillo hueco cerámico',200),(2,'Hormigón ',400),(3,'Hormigón celular ',550),(4,'Hormigón alivianado',475),(5,'Panel prefabricado de hormigón ',6500),(6,'Panel prefabricado de hormigón con aislación térmica ',9500),(7,'Madera',2000),(8,'Acero galvanizado',23000),(9,'Placa Durlock estándar',13500),(10,'Placa Durlock antihumedad',17500),(11,'Placa Durlock resistente al fuego',22000);
 /*!40000 ALTER TABLE `material` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -84,12 +110,15 @@ CREATE TABLE `pared` (
   `id` int NOT NULL AUTO_INCREMENT,
   `id_proyecto` int NOT NULL,
   `id_material` int NOT NULL,
+  `altura` float NOT NULL,
+  `ancho` float NOT NULL,
+  `profundidad` float NOT NULL,
   PRIMARY KEY (`id`),
   KEY `id_material` (`id_material`),
   KEY `id_proyecto` (`id_proyecto`),
   CONSTRAINT `pared_ibfk_1` FOREIGN KEY (`id_material`) REFERENCES `material` (`id`),
   CONSTRAINT `pared_ibfk_2` FOREIGN KEY (`id_proyecto`) REFERENCES `proyecto` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -98,57 +127,8 @@ CREATE TABLE `pared` (
 
 LOCK TABLES `pared` WRITE;
 /*!40000 ALTER TABLE `pared` DISABLE KEYS */;
+INSERT INTO `pared` VALUES (1,2,1,1.7,3,1),(2,2,1,3.17,3,1);
 /*!40000 ALTER TABLE `pared` ENABLE KEYS */;
-UNLOCK TABLES;
-
---
--- Table structure for table `proveedor`
---
-
-DROP TABLE IF EXISTS `proveedor`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `proveedor` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `nombre` varchar(255) NOT NULL,
-  `contacto` varchar(255) NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping data for table `proveedor`
---
-
-LOCK TABLES `proveedor` WRITE;
-/*!40000 ALTER TABLE `proveedor` DISABLE KEYS */;
-/*!40000 ALTER TABLE `proveedor` ENABLE KEYS */;
-UNLOCK TABLES;
-
---
--- Table structure for table `proveedor_material`
---
-
-DROP TABLE IF EXISTS `proveedor_material`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `proveedor_material` (
-  `id_proveedor` int NOT NULL,
-  `id_material` int NOT NULL,
-  PRIMARY KEY (`id_proveedor`,`id_material`),
-  KEY `id_material` (`id_material`),
-  CONSTRAINT `proveedor_material_ibfk_1` FOREIGN KEY (`id_material`) REFERENCES `material` (`id`),
-  CONSTRAINT `proveedor_material_ibfk_2` FOREIGN KEY (`id_proveedor`) REFERENCES `proveedor` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping data for table `proveedor_material`
---
-
-LOCK TABLES `proveedor_material` WRITE;
-/*!40000 ALTER TABLE `proveedor_material` DISABLE KEYS */;
-/*!40000 ALTER TABLE `proveedor_material` ENABLE KEYS */;
 UNLOCK TABLES;
 
 --
@@ -161,12 +141,12 @@ DROP TABLE IF EXISTS `proyecto`;
 CREATE TABLE `proyecto` (
   `id` int NOT NULL AUTO_INCREMENT,
   `nombre` varchar(255) NOT NULL,
-  `fecha_creacion` date NOT NULL,
+  `fecha_creacion` datetime NOT NULL,
   `id_usuario` int NOT NULL,
   PRIMARY KEY (`id`),
   KEY `id_usuario` (`id_usuario`),
   CONSTRAINT `proyecto_ibfk_1` FOREIGN KEY (`id_usuario`) REFERENCES `usuario` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -175,6 +155,7 @@ CREATE TABLE `proyecto` (
 
 LOCK TABLES `proyecto` WRITE;
 /*!40000 ALTER TABLE `proyecto` DISABLE KEYS */;
+INSERT INTO `proyecto` VALUES (2,'Casa Ocampo 1234','2024-11-24 00:00:00',1);
 /*!40000 ALTER TABLE `proyecto` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -214,4 +195,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2024-11-20 18:44:20
+-- Dump completed on 2024-11-25 19:29:31
