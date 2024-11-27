@@ -9,6 +9,7 @@ from datetime import datetime
 from flask import render_template, session
 from flask_migrate import Migrate
 from functools import wraps
+from sqlalchemy.orm import joinedload
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'tu_clave_secreta_muy_segura'
@@ -95,7 +96,7 @@ def medir_pared(image):
     # Aquí implementarías la lógica para medir la pared usando OpenCV
     # Este es un ejemplo simplificado, necesitarás desarrollar un algoritmo más robusto
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+    edges = cv2.Canny(gray, 10, 50, apertureSize=3)
     lines = cv2.HoughLines(edges, 1, np.pi/180, 200)
     
     # Aquí procesarías las líneas para determinar altura y ancho
@@ -147,6 +148,11 @@ def draw_contours(image, contours):
     image_with_contours = cv2.drawContours(image.copy(), contours, -1, (0, 255, 0), 2)
     return image_with_contours
 
+@app.errorhandler(404)
+def not_found(e):
+    return render_template('404.html'), 404
+
+
 # Rutas
 
 @app.route('/')
@@ -162,6 +168,10 @@ def registro():
         nombre = request.form['nombre']
         mail = request.form['mail']
         password = request.form['password']
+
+        if not nombre or not mail or not password:
+            flash('Todos los campos son obligatorios')
+            return redirect(url_for('registro'))
 
         usuario_existente = Usuario.query.filter_by(mail=mail).first()
         if usuario_existente:
@@ -261,7 +271,11 @@ def nuevo_proyecto():
 @app.route('/proyecto/<int:proyecto_id>')
 @requiere_login
 def ver_proyecto(proyecto_id):
-    proyecto = Proyecto.query.get_or_404(proyecto_id)
+
+    proyecto = Proyecto.query.options(
+        joinedload(Proyecto.paredes).joinedload(Pared.mediciones)
+    ).get_or_404(proyecto_id)
+
     materiales = Material.query.all()
     
     # Obtener las mediciones asociadas a las paredes del proyecto
@@ -322,7 +336,7 @@ def guardar_mediciones(proyecto_id):
         db.session.flush()  # Flush para obtener el ID de la nueva pared
         
         # Calcular costo total
-        area_total = ancho * alto * 2 + ancho * profundidad * 2  # Área total de la pared
+        area_total = 2 * (ancho * alto + ancho * profundidad + alto * profundidad)  # Área total de la pared
         costo_total = area_total * material.precioPorUnidad
         
         # Crear una nueva medición asociada a la nueva pared
@@ -359,14 +373,17 @@ def process_reference(proyecto_id):
 
         # Convertir a escala de grises y detectar bordes
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(gray, 30, 100)
+        edges = cv2.Canny(gray, 10, 50)
 
         # Detectar contornos
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         # Filtrar contornos para encontrar la regla (supongo que la regla es el contorno más largo)
-        max_contour = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(max_contour)
+        if not contours:
+            return jsonify({'error': 'No se encontraron contornos'}), 400
+        else:
+            max_contour = max(contours, key=cv2.contourArea)
+            x, y, w, h = cv2.boundingRect(max_contour)
 
         # Dibujar contornos en la imagen
         image_with_contours = draw_contours(image, [max_contour])
@@ -399,14 +416,17 @@ def process_measurement():
 
         # Convertir a escala de grises y detectar bordes
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(gray, 30, 100)
+        edges = cv2.Canny(gray, 10, 50)
 
         # Detectar contornos
         contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         # Filtrar contornos para encontrar el objeto a medir (usaremos el contorno más grande)
-        max_contour = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(max_contour)
+        if not contours:
+            return jsonify({'error': 'No se encontraron contornos'}), 400
+        else:
+            max_contour = max(contours, key=cv2.contourArea)
+            x, y, w, h = cv2.boundingRect(max_contour)
 
         # Devolver el ancho en píxeles
         return jsonify({'objectWidthPixels': w})

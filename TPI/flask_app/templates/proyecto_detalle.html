@@ -63,7 +63,7 @@
             
             <div id="measurementControls" class="mt-3">
                 <p id="measurementInstructions" class="mb-3">
-                    Alinee la regla horizontal con el ancho de la pared
+                    Aprete el botón cuando vea que se identifica correctamente el objeto de referencia
                 </p>
                 <button id="captureReference" class="btn btn-secondary">Capturar Referencia</button>
                 <button id="captureWidth" class="btn btn-success" style="display: none;">Capturar Ancho</button>
@@ -229,13 +229,131 @@
                 return knowWidthMeters / referenceWidthPixels;
             }
 
-            // Capturar la medida de la regla de referencia
-            captureReferenceBtn.addEventListener('click', () => {
+            let referenceContourDetected = false;
+            let referenceContour = null;
+
+            function detectReferenceContour(src) {
+                const gray = new cv.Mat();
+                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+                const edges = new cv.Mat();
+                cv.Canny(gray, edges, 10, 50);
+
+                const contours = new cv.MatVector();
+                const hierarchy = new cv.Mat();
+                cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+                // Find contours with a specific area range (to filter out tiny or extremely large contours)
+                const validContours = [];
+                const minArea = 500; // Adjust based on the actual size of the reference object
+                const maxArea = video.videoWidth * video.videoHeight * 0.8; // Adjust percentage as needed
+
+                for (let i = 0; i < contours.size(); i++) {
+                    const contour = contours.get(i);
+                    const area = cv.contourArea(contour);
+                    if (area > minArea && area < maxArea) {
+                        validContours.push(contour);
+                    }
+                }
+
+                // If we have valid contours, highlight the largest one
+                if (validContours.length > 0) {
+                    referenceContour = validContours.reduce((largest, current) => 
+                        cv.contourArea(current) > cv.contourArea(largest) ? current : largest
+                    );
+                    referenceContourDetected = true;
+                    return true;
+                }
+
+                referenceContourDetected = false;
+                return false;
+            }
+
+            function drawReferenceContour() {
+                if (!referenceContour) return;
+
                 const canvas = document.createElement('canvas');
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                const src = cv.imread(canvas);
+                const contourCanvas = document.createElement('canvas');
+                contourCanvas.width = video.videoWidth;
+                contourCanvas.height = video.videoHeight;
+                const contourCtx = contourCanvas.getContext('2d');
+                contourCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                const color = new cv.Scalar(0, 255, 0); // Green color for reference contour
+                cv.drawContours(src, new cv.MatVector([referenceContour]), 0, color, 3);
+
+                // Convert OpenCV Mat to canvas
+                cv.imshow(contourCanvas, src);
+
+                // Update the rulerCanvas with the contour
+                const rulerCtx = rulerCanvas.getContext('2d');
+                rulerCtx.clearRect(0, 0, rulerCanvas.width, rulerCanvas.height);
+                rulerCtx.drawImage(contourCanvas, 0, 0);
+
+                // Clean up
+                src.delete();
+            }
+
+            // Modify the contour detection interval to focus on reference detection
+            video.addEventListener('play', () => {
+                const fps = 30;
+                const interval = 1000 / fps;
+                const contourInterval = setInterval(() => {
+                    if (captureReferenceBtn.style.display !== 'none') {
+
+                        referenceContourDetected = false;
+                        referenceContour = null;
+
+                        const canvas = document.createElement('canvas');
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                        const src = cv.imread(canvas);
+                        detectReferenceContour(src);
+                        
+                        if (referenceContourDetected) {
+                            drawReferenceContour();
+                        }
+
+                        src.delete();
+                    }
+                }, interval);
+            });
+
+            // Capturar la medida de la regla de referencia
+            captureReferenceBtn.addEventListener('click', () => {
+                console.log('Intentando capturar referencia...');
+
+                // Restablecer el estado antes de intentar detectar el contorno de referencia
+                referenceContourDetected = false;
+                referenceContour = null;
+
+                // Ocultar el rulerCanvas durante la captura de referencia
+                rulerCanvas.style.display = 'none';
+
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                const src = cv.imread(canvas);
+                detectReferenceContour(src);
+
+                if (!referenceContourDetected) {
+                    console.log('No se detectó un objeto de referencia válido.');
+                    alert('No se detectó un objeto de referencia válido. Intente de nuevo.');
+                    src.delete();
+                    return;
+                }
 
                 // Enviar imagen de la regla de referencia al servidor
                 const imageData = canvas.toDataURL('image/png');
@@ -244,15 +362,20 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ imageData: imageData })
+                    body: JSON.stringify({ 
+                        imageData: imageData,
+                        contour: referenceContour.data32S // Convert contour to serializable format
+                    })
                 })
                 .then(response => response.json())
                 .then(data => {
                     if (data.error) {
+                        console.log('Error capturando la referencia:', data.error);
                         alert('Error capturando la referencia. Intenta de nuevo.');
+                        // Asegurarse de que el botón siga siendo interactivo
+                        captureReferenceBtn.disabled = false;
                     } else {
                         pixelToMeterRatio = data.pixelToMeterRatio;
-                        // pixelToMeterRatio = calculatePixelToMeterRatio(data.referenceWidthPixels); <-- así era antes
                         alert('Referencia capturada. Ahora puedes medir.');
                         captureReferenceBtn.style.display = 'none';
                         captureWidthBtn.style.display = 'block';
@@ -260,9 +383,24 @@
                         // Mostrar la imagen con contornos
                         referenceImage.src = `data:image/png;base64,${data.imageWithContours}`;
                         referenceImageContainer.style.display = 'block';
-                    }         
+
+                        // Preparar para modo de ancho
+                        currentMode = 'width';
+                        measurementInstructions.textContent = "Alinee la regla horizontal con el ancho de la pared";
+
+                        // Mostrar la regla horizontal para medir el ancho
+                        rulerCanvas.style.display = 'block';
+                        drawRuler();
+                    }
                 })
-                .catch(error => console.error('Error:', error));
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error capturando la referencia. Intenta de nuevo.');
+                    // Asegurarse de que el botón siga siendo interactivo
+                    captureReferenceBtn.disabled = false;
+                });
+
+                src.delete();
             });
 
             function measureObject() {
@@ -332,6 +470,10 @@
             }
 
             captureWidthBtn.addEventListener("click", async () => {
+
+                rulerCanvas.style.display = 'block';
+                drawRuler();
+
                 try {
                     const measurements = await calculateMeasurement();
                     widthValue.textContent = measurements.width;
@@ -397,7 +539,7 @@
 
                         // Aplicar detección de bordes (Canny)
                         const edges = new cv.Mat();
-                        cv.Canny(gray, edges, 30, 100); // --> cambiar a 30, 100?
+                        cv.Canny(gray, edges, 10, 50); 
 
                         // Detectar contornos
                         const contours = new cv.MatVector();
@@ -463,7 +605,7 @@
                 const gray = new cv.Mat();
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
                 const edges = new cv.Mat();
-                cv.Canny(gray, edges, 50, 150);
+                cv.Canny(gray, edges, 10, 50);
 
                 const contours = new cv.MatVector();
                 const hierarchy = new cv.Mat();
@@ -491,12 +633,12 @@
             }
 
             // Cambiar el texto de instrucciones
-            captureReferenceBtn.addEventListener('click', () => {
-                measurementInstructions.textContent = "Aprete el botón cuando vea que se identifica correctamente el objeto de referencia";
+            /*captureReferenceBtn.addEventListener('click', () => {
+                measurementInstructions.textContent = "Alinee la regla horizontal con el ancho de la pared";
                 rulerCanvas.style.display = 'block';
                 ruler.style.display = 'none';
                 showContours();
-            });
+            });*/
 
             // Actualizar contornos en cada frame
             video.addEventListener('play', () => {
