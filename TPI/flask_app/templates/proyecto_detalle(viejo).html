@@ -1,3 +1,5 @@
+<!-- Este archivo lo mantengo por las dudas -->
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -6,6 +8,37 @@
     <title>{{ proyecto.nombre }} - CostBuilder</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
+        /* con positionRuler 
+        #videoElement {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto;
+            display: none;
+        }
+        .ruler {
+            position: absolute;
+            background-color: rgba(255, 255, 0, 0.5);
+            pointer-events: none;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        .ruler-horizontal {
+            height: 2px;
+            width: 100%;
+        }
+        .ruler-vertical {
+            width: 2px;
+            height: 100%;
+            left: 50%;
+            transform: translateX(-50%); 
+        }
+        #measurementControls {
+            display: none;
+        } */
+
+
         /* con drawRuler */
         #videoElement {
             position: relative;
@@ -65,14 +98,8 @@
                 <p id="measurementInstructions" class="mb-3">
                     Alinee la regla horizontal con el ancho de la pared
                 </p>
-                <button id="captureReference" class="btn btn-secondary">Capturar Referencia</button>
-                <button id="captureWidth" class="btn btn-success" style="display: none;">Capturar Ancho</button>
+                <button id="captureWidth" class="btn btn-success">Capturar Ancho</button>
                 <button id="captureHeight" class="btn btn-success" style="display: none;">Capturar Alto</button>
-            </div>
-
-            <div id="referenceImageContainer" class="mt-4" style="display: none;">
-                <h3>Imagen de Referencia con Contornos</h3>
-                <img id="referenceImage" src="" alt="Imagen de Referencia con Contornos" style="max-width: 100%;">
             </div>
 
             <div id="measurementForm" class="mt-4" style="display: none;">
@@ -137,6 +164,8 @@
 
     <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady()" type="text/javascript"></script>
     <script>
+        console.log('El script JavaScript está cargado correctamente.');
+
         let cv = null;
         let pixelToMeterRatio = null; // Relación entre píxeles y metros
 
@@ -164,9 +193,6 @@
             const heightValue = document.getElementById('heightValue');
             const anchoInput = document.getElementById('anchoInput');
             const altoInput = document.getElementById('altoInput');
-            const referenceImageContainer = document.getElementById('referenceImageContainer');
-            const referenceImage = document.getElementById('referenceImage');
-
 
             const startMeasurementBtn = document.getElementById('startMeasurement');
             if (startMeasurementBtn) {
@@ -219,14 +245,26 @@
                 ctx.stroke();
             }
 
+            /* solo positionRuler() 
+            function positionRuler() {
+                const videoRect = video.getBoundingClientRect();
+                ruler.style.position = 'absolute';
+                ruler.style.left = `${videoRect.left}px`;
+                ruler.style.top = `${videoRect.top + videoRect.height / 2}px`;
+                ruler.style.width = `${videoRect.width}px`;
+            } */
+
+            /* con drawRuler */
             function positionRuler() {
                 rulerCanvas.width = video.videoWidth;
                 rulerCanvas.height = video.videoHeight;
                 drawRuler();
             }
 
-            function calculatePixelToMeterRatio(referenceWidthPixels, knowWidthMeters) {
-                return knowWidthMeters / referenceWidthPixels;
+            /* con referencia */
+            function calculatePixelToMeterRatio(referenceWidthPixels) {
+                const refRealWidthMeters = 0.3; // 30 cm en metros
+                return refRealWidthMeters / referenceWidthPixels;
             }
 
             // Capturar la medida de la regla de referencia
@@ -251,19 +289,15 @@
                     if (data.error) {
                         alert('Error capturando la referencia. Intenta de nuevo.');
                     } else {
-                        pixelToMeterRatio = data.pixelToMeterRatio;
-                        // pixelToMeterRatio = calculatePixelToMeterRatio(data.referenceWidthPixels); <-- así era antes
+                        pixelToMeterRatio = calculatePixelToMeterRatio(data.referenceWidthPixels);
                         alert('Referencia capturada. Ahora puedes medir.');
                         captureReferenceBtn.style.display = 'none';
                         captureWidthBtn.style.display = 'block';
-
-                        // Mostrar la imagen con contornos
-                        referenceImage.src = `data:image/png;base64,${data.imageWithContours}`;
-                        referenceImageContainer.style.display = 'block';
                     }         
                 })
                 .catch(error => console.error('Error:', error));
             });
+            
 
             function measureObject() {
                 const canvas = document.createElement('canvas');
@@ -290,7 +324,7 @@
                     }
                 })
                 .catch(err => console.error('Error:', err));
-            }
+            } 
 
             function calculateMeasurementInMeters(pixelMeasurement) {
                 if (!pixelToMeterRatio) {
@@ -331,6 +365,47 @@
                 });
             }
 
+            // anterior
+            /*
+            captureWidthBtn.addEventListener('click', () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                // Convert canvas to base64 image
+                const imageData = canvas.toDataURL('image/png');
+
+                // Send image data to the server
+                fetch('/proyecto/{{ proyecto.id }}/process_image', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ imageData: imageData, measurementType: 'width' })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Response from server:', data);
+                    widthValue.textContent = data.measurement;
+                    anchoInput.value = data.measurement;
+                    // Cambiar la regla a vertical
+                    currentMode = 'height';
+                    ruler.classList.remove('ruler-horizontal');
+                    ruler.classList.add('ruler-vertical');
+                    measurementInstructions.textContent = 'Alinee la regla vertical con el alto de la pared';
+                    captureWidthBtn.style.display = 'none';
+                    captureHeightBtn.style.display = 'block';
+
+                    // Volver a posicionar la regla cuando cambie a vertical
+                    positionRuler();
+                })
+                .catch(error => console.error('Error:', error));
+            });
+            */
+
+            // actual
             captureWidthBtn.addEventListener("click", async () => {
                 try {
                     const measurements = await calculateMeasurement();
@@ -354,6 +429,23 @@
                 }
             });
 
+            // anterior
+            /*
+            captureHeightBtn.addEventListener('click', () => {
+                const height = calculateMeasurement(); // Implementar esta función
+                heightValue.textContent = height;
+                altoInput.value = height;
+                
+                // Mostrar formulario de mediciones
+                measurementForm.style.display = 'block';
+                video.style.display = 'none';
+                ruler.style.display = 'none';
+                captureHeightBtn.style.display = 'none';
+                measurementInstructions.style.display = 'none';
+            });
+            */
+
+            // actual
             captureHeightBtn.addEventListener("click", async () => {
                 try {
                     const measurements = await calculateMeasurement();
@@ -363,6 +455,7 @@
                     // Mostrar formulario de mediciones
                     measurementForm.style.display = "block";
                     video.style.display = "none";
+                    ruler.style.display = "none";
                     rulerCanvas.style.display = "none"; // Ocultar el canvas de la regla
                     captureHeightBtn.style.display = "none";
                     measurementInstructions.style.display = "none";
@@ -397,7 +490,7 @@
 
                         // Aplicar detección de bordes (Canny)
                         const edges = new cv.Mat();
-                        cv.Canny(gray, edges, 30, 100); // --> cambiar a 30, 100?
+                        cv.Canny(gray, edges, 50, 150);
 
                         // Detectar contornos
                         const contours = new cv.MatVector();
@@ -450,61 +543,9 @@
                         reject("Error procesando la imagen con OpenCV: " + error.message);
                     }
                 });
+                // valor de ejemplo
+                // return (Math.random() * 3 + 1).toFixed(2);
             }
-
-            function showContours() {
-                const canvas = document.createElement("canvas");
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                const ctx = canvas.getContext("2d");
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-                const src = cv.imread(canvas);
-                const gray = new cv.Mat();
-                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-                const edges = new cv.Mat();
-                cv.Canny(gray, edges, 50, 150);
-
-                const contours = new cv.MatVector();
-                const hierarchy = new cv.Mat();
-                cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-                const contourCanvas = document.createElement("canvas");
-                contourCanvas.width = video.videoWidth;
-                contourCanvas.height = video.videoHeight;
-                const contourCtx = contourCanvas.getContext("2d");
-                contourCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-                for (let i = 0; i < contours.size(); i++) {
-                    const contour = contours.get(i);
-                    const color = new cv.Scalar(0, 0, 255); // Rojo
-                    cv.drawContours(contourCanvas, contours, i, color, 2);
-                }
-
-                rulerCanvas.getContext("2d").drawImage(contourCanvas, 0, 0);
-
-                gray.delete();
-                edges.delete();
-                contours.delete();
-                hierarchy.delete();
-                src.delete();
-            }
-
-            // Cambiar el texto de instrucciones
-            captureReferenceBtn.addEventListener('click', () => {
-                measurementInstructions.textContent = "Aprete el botón cuando vea que se identifica correctamente el objeto de referencia";
-                rulerCanvas.style.display = 'block';
-                ruler.style.display = 'none';
-                showContours();
-            });
-
-            // Actualizar contornos en cada frame
-            video.addEventListener('play', () => {
-                const fps = 30;
-                const interval = 1000 / fps;
-                setInterval(showContours, interval);
-            });
-
         }
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>

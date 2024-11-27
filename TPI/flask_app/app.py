@@ -136,6 +136,17 @@ def actualizar_precios_materiales():
         except Exception as e:
             print(f"Error actualizando precio de {material_tipo}: {str(e)}")
 
+
+def calibrate_camera(image, known_width_meters, known_width_pixels):
+    # Calcula la relación entre píxeles y metros
+    pixel_to_meter_ratio = known_width_meters / known_width_pixels
+    return pixel_to_meter_ratio
+
+def draw_contours(image, contours):
+    # Dibujar contornos en la imagen
+    image_with_contours = cv2.drawContours(image.copy(), contours, -1, (0, 255, 0), 2)
+    return image_with_contours
+
 # Rutas
 
 @app.route('/')
@@ -333,3 +344,72 @@ def guardar_mediciones(proyecto_id):
     
     print("Redirigiendo a ver_proyecto")  # Imprime un mensaje en la consola
     return redirect(url_for('ver_proyecto', proyecto_id=proyecto_id))
+
+
+@app.route('/proyecto/<int:proyecto_id>/process_reference', methods=['POST'])
+def process_reference(proyecto_id):
+    try:
+        data = request.json
+        image_data = data['imageData']
+
+        # Decodificar la imagen recibida
+        encoded_data = image_data.split(',')[1]
+        nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        # Convertir a escala de grises y detectar bordes
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 30, 100)
+
+        # Detectar contornos
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Filtrar contornos para encontrar la regla (supongo que la regla es el contorno más largo)
+        max_contour = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(max_contour)
+
+        # Dibujar contornos en la imagen
+        image_with_contours = draw_contours(image, [max_contour])
+
+        # Codificar la imagen con contornos a base64
+        _, buffer = cv2.imencode('.png', image_with_contours)
+        encoded_image = base64.b64encode(buffer).decode('utf-8')
+
+        # Calibrar la cámara
+        known_width_meters = 0.3  # Ancho conocido en metros
+        pixel_to_meter_ratio = calibrate_camera(image, known_width_meters, w)
+
+        # Devolver el ancho en píxeles y la relación de calibración
+        return jsonify({'referenceWidthPixels': w, 'pixelToMeterRatio': pixel_to_meter_ratio, 'imageWithContours': encoded_image})
+    except Exception as e:
+        print(f"Error procesando la referencia: {e}")
+        return jsonify({'error': 'Error procesando la referencia'}), 500
+    
+
+@app.route('/process_measurement', methods=['POST'])
+def process_measurement():
+    try:
+        data = request.json
+        image_data = data['imageData']
+
+        # Decodificar la imagen recibida
+        encoded_data = image_data.split(',')[1]
+        nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        # Convertir a escala de grises y detectar bordes
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 30, 100)
+
+        # Detectar contornos
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Filtrar contornos para encontrar el objeto a medir (usaremos el contorno más grande)
+        max_contour = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(max_contour)
+
+        # Devolver el ancho en píxeles
+        return jsonify({'objectWidthPixels': w})
+    except Exception as e:
+        print(f"Error procesando la medida: {e}")
+        return jsonify({'error': 'Error procesando la medida'}), 500
