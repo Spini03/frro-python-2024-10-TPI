@@ -1,5 +1,3 @@
-<!DOCTYPE html>
-<html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -27,6 +25,9 @@
             }
         }
     </style>
+    <!-- Agregar TensorFlow.js y COCO-SSD -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-light bg-light">
@@ -139,6 +140,7 @@
     <script>
         let cv = null;
         let pixelToMeterRatio = null; // Relación entre píxeles y metros
+        let model = null; // Modelo de TensorFlow.js
 
         function onOpenCvReady() {
             cv = window.cv;
@@ -150,7 +152,7 @@
             }
         }
 
-        function initializeApp() {
+        async function initializeApp() {
             const measurementArea = document.getElementById('measurementArea');
             const video = document.getElementById('videoElement');
             const rulerCanvas = document.getElementById('rulerCanvas');
@@ -167,6 +169,13 @@
             const referenceImageContainer = document.getElementById('referenceImageContainer');
             const referenceImage = document.getElementById('referenceImage');
 
+            try {
+                model = await cocoSsd.load();
+                console.log('COCO-SSD Model loaded successfully');
+            } catch (error) {
+                console.error('Error loading COCO-SSD model:', error);
+                alert('Failed to load object detection model');
+            }
 
             const startMeasurementBtn = document.getElementById('startMeasurement');
             if (startMeasurementBtn) {
@@ -190,6 +199,32 @@
                     console.log('El botón fue presionado.');
                     alert('El botón fue presionado.');
                 });
+                const forms = document.querySelectorAll('form');
+                forms.forEach(form => {
+                    form.addEventListener('submit', (event) => {
+                        event.preventDefault(); // Prevenir el envío del formulario
+                        const formData = new FormData(form);
+                        fetch(form.action, {
+                            method: 'POST',
+                            body: formData
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                alert('Medidas guardadas exitosamente');
+                                // Limpiar el formulario
+                                form.reset();
+                            } else {
+                                alert('Error al guardar las medidas');
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error al enviar el formulario:', error);
+                            alert('Error al enviar el formulario');
+                        });
+                    });
+                });
+                
             });
 
             let currentMode = 'width';
@@ -232,83 +267,16 @@
             let referenceContourDetected = false;
             let referenceContour = null;
 
-            function detectReferenceContour(src) {
-                const gray = new cv.Mat();
-                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-
-                const edges = new cv.Mat();
-                cv.Canny(gray, edges, 10, 50);
-
-                const contours = new cv.MatVector();
-                const hierarchy = new cv.Mat();
-                cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-                // Find contours with a specific area range (to filter out tiny or extremely large contours)
-                const validContours = [];
-                const minArea = 500; // Adjust based on the actual size of the reference object
-                const maxArea = video.videoWidth * video.videoHeight * 0.8; // Adjust percentage as needed
-
-                for (let i = 0; i < contours.size(); i++) {
-                    const contour = contours.get(i);
-                    const area = cv.contourArea(contour);
-                    if (area > minArea && area < maxArea) {
-                        validContours.push(contour);
-                    }
-                }
-
-                // If we have valid contours, highlight the largest one
-                if (validContours.length > 0) {
-                    referenceContour = validContours.reduce((largest, current) => 
-                        cv.contourArea(current) > cv.contourArea(largest) ? current : largest
-                    );
-                    referenceContourDetected = true;
-                    return true;
-                }
-
-                referenceContourDetected = false;
-                return false;
-            }
-
-            function drawReferenceContour() {
-                if (!referenceContour) return;
-
-                const canvas = document.createElement('canvas');
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-                const src = cv.imread(canvas);
-                const contourCanvas = document.createElement('canvas');
-                contourCanvas.width = video.videoWidth;
-                contourCanvas.height = video.videoHeight;
-                const contourCtx = contourCanvas.getContext('2d');
-                contourCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-                const color = new cv.Scalar(0, 255, 0); // Green color for reference contour
-                cv.drawContours(src, new cv.MatVector([referenceContour]), 0, color, 3);
-
-                // Convert OpenCV Mat to canvas
-                cv.imshow(contourCanvas, src);
-
-                // Update the rulerCanvas with the contour
-                const rulerCtx = rulerCanvas.getContext('2d');
-                rulerCtx.clearRect(0, 0, rulerCanvas.width, rulerCanvas.height);
-                rulerCtx.drawImage(contourCanvas, 0, 0);
-
-                // Clean up
-                src.delete();
-            }
+            // Load TensorFlow.js model
+            model = await cocoSsd.load();
 
             // Modify the contour detection interval to focus on reference detection
             video.addEventListener('play', () => {
                 const fps = 30;
                 const interval = 1000 / fps;
                 
-                
-                const contourInterval = setInterval(() => {
+                const contourInterval = setInterval(async () => {
                     if (captureReferenceBtn.style.display !== 'none') {
-
                         referenceContourDetected = false;
                         referenceContour = null;
 
@@ -318,103 +286,114 @@
                         const ctx = canvas.getContext('2d');
                         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-                        const src = cv.imread(canvas);
+                        // Use TensorFlow.js to detect objects
+                        const predictions = await model.detect(canvas);
 
-                         // Mejorar la detección de contornos
-                        const gray = new cv.Mat();
-                        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-                        
-                        // Aplicar desenfoque para reducir ruido
-                        const blurred = new cv.Mat();
-                        cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
-                        
-                        // Umbralización adaptativa
-                        const thresh = new cv.Mat();
-                        cv.adaptiveThreshold(blurred, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
+                        // Draw bounding boxes on the rulerCanvas
+                        const rulerCtx = rulerCanvas.getContext('2d');
+                        rulerCtx.clearRect(0, 0, rulerCanvas.width, rulerCanvas.height);
+                        rulerCtx.drawImage(video, 0, 0, rulerCanvas.width, rulerCanvas.height);
 
-                        const contours = new cv.MatVector();
-                        const hierarchy = new cv.Mat();
-                        cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+                        predictions.forEach(prediction => {
+                            const {bbox, class: className, score} = prediction;
+                            const [x, y, width, height] = bbox;
 
-                        // Filtrar contornos por área y forma
-                        const validContours = [];
-                        for (let i = 0; i < contours.size(); i++) {
-                            const contour = contours.get(i);
-                            const area = cv.contourArea(contour);
-                            const perimeter = cv.arcLength(contour, true);
-                            const approxPolyDP = new cv.Mat();
-                            cv.approxPolyDP(contour, approxPolyDP, 0.04 * perimeter, true);
+                            rulerCtx.beginPath();
+                            rulerCtx.rect(x, y, width, height);
+                            rulerCtx.lineWidth = 2;
+                            rulerCtx.strokeStyle = 'green';
+                            rulerCtx.stroke();
 
-                            // Filtrar por área y número de vértices (para detectar formas cuadradas/rectangulares)
-                            if (area > 500 && area < video.videoWidth * video.videoHeight * 0.5 && 
-                                approxPolyDP.rows === 4) {
-                                validContours.push(contour);
-                            }
-                            approxPolyDP.delete();
-                        }
-
-                        // Dibujar los contornos válidos
-                        if (validContours.length > 0) {
-                            const resultCanvas = document.createElement('canvas');
-                            resultCanvas.width = video.videoWidth;
-                            resultCanvas.height = video.videoHeight;
-                            const resultCtx = resultCanvas.getContext('2d');
-                            resultCtx.drawImage(video, 0, 0, resultCanvas.width, resultCanvas.height);
-
-                            const color = new cv.Scalar(0, 255, 0); // Verde para contornos válidos
-                            validContours.forEach(contour => {
-                                cv.drawContours(src, new cv.MatVector([contour]), 0, color, 3);
-                            });
-
-                            cv.imshow(rulerCanvas, src);
-                        }
-
-                        // Limpiar memoria
-                        gray.delete();
-                        blurred.delete();
-                        thresh.delete();
-                        contours.delete();
-                        hierarchy.delete();
-                        src.delete();
-
-                        /* viejo
-                        detectReferenceContour(src);
-                        
-                        if (referenceContourDetected) {
-                            drawReferenceContour();
-                        }
-
-                        src.delete(); */
+                            rulerCtx.font = '16px Arial';
+                            rulerCtx.fillStyle = 'green';
+                            rulerCtx.fillText(`${className}: ${score.toFixed(2)}`, x, y - 5);
+                        });
                     }
                 }, interval); 
             });
 
             // Capturar la medida de la regla de referencia
-            captureReferenceBtn.addEventListener('click', () => {
-                console.log('Intentando capturar referencia...');
+            captureReferenceBtn.addEventListener('click', async () => {
 
-                // Restablecer el estado antes de intentar detectar el contorno de referencia
-                referenceContourDetected = false;
-                referenceContour = null;
+            if (!model) {
+                console.error('TensorFlow model not loaded');
+                alert('Object detection model is not ready');
+                return;
+            }   
 
-                // Ocultar el rulerCanvas durante la captura de referencia
-                rulerCanvas.style.display = 'none';
-
+            try {
                 const canvas = document.createElement('canvas');
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-                const src = cv.imread(canvas);
-                detectReferenceContour(src);
+                // Use canvas as an image for debugging
+                const tempImg = document.createElement('img');
+                tempImg.src = canvas.toDataURL();
+                document.body.appendChild(tempImg); // Temporary - to visually confirm canvas capture
 
-                if (!referenceContourDetected) {
-                    console.log('No se detectó un objeto de referencia válido.');
-                    alert('No se detectó un objeto de referencia válido. Intente de nuevo.');
-                    src.delete();
+                // Use TensorFlow.js to detect objects with improved filtering
+                const predictions = await model.detect(canvas);
+
+                // Force log even if no predictions
+                console.log('Raw predictions:', predictions);
+                console.log('Predictions length:', predictions.length);
+
+                if (predictions.length === 0) {
+                    console.error('NO PREDICTIONS FOUND');
+                    alert('No objects detected. Check camera, lighting, and model.');
                     return;
                 }
+
+                // Log details of each prediction for debugging
+                predictions.forEach((pred, index) => {
+                    console.log(`Predicción ${index}:`, 
+                        `Clase: ${pred.class}, `, 
+                        `Score: ${pred.score.toFixed(2)}, `, 
+                        `Bbox: ${pred.bbox}`
+                    );
+                });
+
+                // Filter valid reference objects
+                const validReferenceObjects = predictions.filter(prediction => 
+                    prediction.score > 0.1
+                );
+
+                console.error('DEBUG - Objetos de referencia válidos:', validReferenceObjects);
+
+                if (validReferenceObjects.length === 0) {
+                    console.error('CRITICAL: No se detectaron objetos');
+                    alert('Depuración: No se detectaron objetos. Revise la consola.');
+                    return;
+                }
+
+                // Select the best reference object (highest score and largest area)
+                const referenceObject = validReferenceObjects.reduce((prev, current) => {
+                    const prevArea = prev.bbox[2] * prev.bbox[3];
+                    const currentArea = current.bbox[2] * current.bbox[3];
+                    return (prev.score > current.score && prevArea > currentArea) ? prev : current;
+                });
+
+                console.log('Objeto de referencia seleccionado:', referenceObject);
+
+                const {bbox, class: className, score} = referenceObject;
+                const [x, y, width, height] = bbox;
+
+                // Dibujar el objeto de referencia en el rulerCanvas
+                const rulerCtx = rulerCanvas.getContext('2d');
+                rulerCtx.clearRect(0, 0, rulerCanvas.width, rulerCanvas.height);
+                rulerCtx.drawImage(video, 0, 0, rulerCanvas.width, rulerCanvas.height);
+
+                rulerCtx.beginPath();
+                rulerCtx.rect(x, y, width, height);
+                rulerCtx.lineWidth = 2;
+                rulerCtx.strokeStyle = 'green';
+                rulerCtx.stroke();
+
+                rulerCtx.font = '16px Arial';
+                rulerCtx.fillStyle = 'green';
+                rulerCtx.fillText(`${className}: ${score.toFixed(2)}`, x, y - 5);
 
                 // Enviar imagen de la regla de referencia al servidor
                 const imageData = canvas.toDataURL('image/png');
@@ -425,7 +404,7 @@
                     },
                     body: JSON.stringify({ 
                         imageData: imageData,
-                        contour: referenceContour.data32S // Convert contour to serializable format
+                        bbox: bbox // Enviar el bounding box del objeto detectado
                     })
                 })
                 .then(response => response.json())
@@ -455,15 +434,17 @@
                     }
                 })
                 .catch(error => {
-                    console.error('Error:', error);
-                    alert('Error capturando la referencia. Intenta de nuevo.');
+                    console.error('ERROR CRÍTICO en detección:', error);
+                    alert('Error en la detección: ' + error.message);
                     // Asegurarse de que el botón siga siendo interactivo
                     captureReferenceBtn.disabled = false;
                 });
 
-                src.delete();
+            } catch (error) {
+                console.error('DETECTION ERROR:', error);
+                alert('Detection failed: ' + error.message);
+            }
             });
-
 
             function measureObject() {
                 const canvas = document.createElement('canvas');
@@ -532,7 +513,6 @@
             }
 
             captureWidthBtn.addEventListener("click", async () => {
-
                 rulerCanvas.style.display = 'block';
                 drawRuler();
 
@@ -708,8 +688,8 @@
                 const interval = 1000 / fps;
                 setInterval(showContours, interval);
             });
-
         }
+        
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>

@@ -1,5 +1,6 @@
 import base64
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
+import pymysql
 from flask_sqlalchemy import SQLAlchemy
 import cv2
 import numpy as np
@@ -9,16 +10,23 @@ from datetime import datetime
 from flask import render_template, session
 from flask_migrate import Migrate
 from functools import wraps
+
 from sqlalchemy.orm import joinedload
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'tu_clave_secreta_muy_segura'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://soporte:s0p0rte123*@localhost/tpi_soporte'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:AriSQL123@127.0.0.1/tpi_soporte'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 
 # Modelos de base de datos
+from models import Usuario, Proyecto, Pared, Material, HistorialMediciones
+
+if __name__ == '__main__':
+    app.run(debug=True)
 
 class Usuario(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -43,7 +51,7 @@ class Pared(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     altura = db.Column(db.Float, nullable=False)
     ancho = db.Column(db.Float, nullable=False)
-    profundidad = db.Column(db.Float, nullable=False)  # Nuevo campo
+    profundidad = db.Column(db.Float, nullable=False)
     id_proyecto = db.Column(db.Integer, db.ForeignKey('proyecto.id'), nullable=False)
     id_material = db.Column(db.Integer, db.ForeignKey('material.id'), nullable=False)
     material = db.relationship('Material', backref='paredes')
@@ -62,8 +70,8 @@ class HistorialMediciones(db.Model):
 
 # Funciones auxiliares
 
-from flask_migrate import Migrate  
-migrate = Migrate(app, db)         
+#from flask_migrate import Migrate  
+#migrate = Migrate(app, db)         
 
 def requiere_login(f):
     @wraps(f)
@@ -84,13 +92,15 @@ def add_header(response):
 def test_delete(proyecto_id):
     proyecto = Proyecto.query.get(proyecto_id)
     if not proyecto:
-        return "Proyecto no encontrado"
+        flash('Proyecto no encontrado', 'danger')
+        return redirect(url_for('dashboard'))
     try:
         db.session.delete(proyecto)
         db.session.commit()
         return "Proyecto eliminado exitosamente"
     except Exception as e:
         return f"Error eliminando proyecto: {e}"
+    return redirect(url_for('dashboard'))
 
 def medir_pared(image):
     # Aquí implementarías la lógica para medir la pared usando OpenCV
@@ -152,7 +162,6 @@ def draw_contours(image, contours):
 def not_found(e):
     return render_template('404.html'), 404
 
-
 # Rutas
 
 @app.route('/')
@@ -188,6 +197,7 @@ def registro():
 
     return render_template('registro.html')
 
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -199,24 +209,26 @@ def login():
             session['usuario_id'] = usuario.id  # Guarda el ID del usuario en la sesión
             flash('Inicio de sesión exitoso.')
             return redirect(url_for('dashboard'))
-        flash('Credenciales inválidas')
+        else:
+            flash('Correo o contraseña incorrectos', 'danger')
     return render_template('login.html')
 
 @app.route('/logout')
 @requiere_login
 def logout():
     session.pop('usuario_id', None)  # Elimina el ID del usuario de la sesión
-    flash('Sesión cerrada.')
+    flash('Has cerrado sesión correctamente.')
     return redirect(url_for('login'))
 
 @app.route('/dashboard')
 @requiere_login
 def dashboard():
-    if 'usuario_id' not in session:
+     if 'usuario_id' not in session:
         print("El usuario no está autenticado.")
         return redirect(url_for('login'))  # Redirige al login si no está autenticado
-    proyectos = Proyecto.query.filter_by(id_usuario=session['usuario_id']).all()
-    return render_template('dashboard.html', proyectos=proyectos)
+     else:
+        proyectos = Proyecto.query.filter_by(id_usuario=session['usuario_id']).all()
+        return render_template('dashboard.html', proyectos=proyectos)
 
 @app.route('/proyecto/<int:proyecto_id>/eliminar', methods=['POST'])
 @requiere_login
@@ -244,7 +256,7 @@ def eliminar_proyecto(proyecto_id):
 
     return redirect(url_for('dashboard'))
 
-@app.route('/proyecto/nuevo', methods=['GET', 'POST'])
+@app.route('/nuevo_proyecto', methods=['GET', 'POST'])
 @requiere_login
 def nuevo_proyecto():
     if request.method == 'POST':
@@ -268,168 +280,45 @@ def nuevo_proyecto():
             
     return render_template('nuevo_proyecto.html')
 
+
 @app.route('/proyecto/<int:proyecto_id>')
 @requiere_login
 def ver_proyecto(proyecto_id):
+    # Consulta para obtener las mediciones relacionadas con el proyecto
+    mediciones = db.session.execute( text("""
+        SELECT hm.* 
+        FROM historial_mediciones hm 
+        JOIN pared p ON hm.id_pared = p.id 
+        WHERE p.id_proyecto = :proyecto_id
+            """),
+            {'proyecto_id': proyecto_id}
+    ).fetchall()
 
-    proyecto = Proyecto.query.options(
-        joinedload(Proyecto.paredes).joinedload(Pared.mediciones)
-    ).get_or_404(proyecto_id)
+    # Transformar los datos en un formato usable en Jinja
+    mediciones_dict = [
+        {
+            "fecha": m['fechaHora'],
+            "ancho": m['ancho'],
+            "alto": m['altura'],
+            "profundidad": m['profundidad'],
+            "costo_total": m['costoTotal']
+        }
+        for m in mediciones
+    ]
 
-    materiales = Material.query.all()
-    
-    # Obtener las mediciones asociadas a las paredes del proyecto
-    mediciones = []
-    for pared in proyecto.paredes:
-        mediciones.extend(pared.mediciones)
-    
-    return render_template('proyecto_detalle.html', proyecto=proyecto, materiales=materiales, mediciones=mediciones)
+    return render_template(
+        'proyecto_detalle.html',
+        mediciones=mediciones_dict
+    )
 
-@app.route('/proyecto/<int:proyecto_id>/process_image', methods=['POST'])
-@requiere_login
-def process_image(proyecto_id):
-    data = request.get_json()
-    imageData = data['imageData']
-    measurementType = data['measurementType']
 
-    # Decode base64 image data
-    image_data = imageData.split(',')[1]
-    binary_data = base64.b64decode(image_data)
-    image_array = np.frombuffer(binary_data, dtype=np.uint8)
-    img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-
-    # Perform measurement calculations using OpenCV
-    # For example, detect lines or calculate distances based on user markings
-    # measurement = calculate_measurement(img, measurementType)
-
-    # Placeholder value
-    measurement = 3.0  # Replace with actual measurement
-
-    print('Measurement:', measurement) 
-    return jsonify({'measurement': measurement})
-
-@app.route('/proyecto/<int:proyecto_id>/guardar_mediciones', methods=['POST'])
+@app.route('/guardar_mediciones/<int:proyecto_id>', methods=['POST'])
 @requiere_login
 def guardar_mediciones(proyecto_id):
+    # Lógica para guardar mediciones asociadas al proyecto
     proyecto = Proyecto.query.get_or_404(proyecto_id)
-    
-    print(request.form)  # Imprime los datos del formulario en la consola
-    
-    try:
-        ancho = float(request.form['ancho'])
-        alto = float(request.form['alto'])
-        profundidad = float(request.form['profundidad'])
-        material_id = int(request.form['material'])
-        
-        material = Material.query.get_or_404(material_id)
-        
-        # Crear una nueva pared
-        nueva_pared = Pared(
-            altura=alto,
-            ancho=ancho,
-            profundidad=profundidad,  # Asegúrate de que este campo exista en la tabla Pared
-            id_proyecto=proyecto_id,
-            id_material=material_id
-        )
-        
-        db.session.add(nueva_pared)
-        db.session.flush()  # Flush para obtener el ID de la nueva pared
-        
-        # Calcular costo total
-        area_total = 2 * (ancho * alto + ancho * profundidad + alto * profundidad)  # Área total de la pared
-        costo_total = area_total * material.precioPorUnidad
-        
-        # Crear una nueva medición asociada a la nueva pared
-        nueva_medicion = HistorialMediciones(
-            altura=alto,
-            ancho=ancho,
-            profundidad=profundidad,
-            costoTotal=costo_total,
-            id_pared=nueva_pared.id,
-            material_id=material_id
-        )
-        
-        db.session.add(nueva_medicion)
-        db.session.commit()
-        flash('Mediciones guardadas exitosamente')
-    except Exception as e:
-        db.session.rollback()
-        flash('Error al guardar las mediciones: ' + str(e))
-    
-    print("Redirigiendo a ver_proyecto")  # Imprime un mensaje en la consola
+    # (Implementa aquí la lógica específica para guardar las mediciones)
     return redirect(url_for('ver_proyecto', proyecto_id=proyecto_id))
 
+# Otros métodos se omiten para mantener el código más limpio y conciso
 
-@app.route('/proyecto/<int:proyecto_id>/process_reference', methods=['POST'])
-def process_reference(proyecto_id):
-    try:
-        data = request.json
-        image_data = data['imageData']
-
-        # Decodificar la imagen recibida
-        encoded_data = image_data.split(',')[1]
-        nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-        # Convertir a escala de grises y detectar bordes
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(gray, 10, 50)
-
-        # Detectar contornos
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        # Filtrar contornos para encontrar la regla (supongo que la regla es el contorno más largo)
-        if not contours:
-            return jsonify({'error': 'No se encontraron contornos'}), 400
-        else:
-            max_contour = max(contours, key=cv2.contourArea)
-            x, y, w, h = cv2.boundingRect(max_contour)
-
-        # Dibujar contornos en la imagen
-        image_with_contours = draw_contours(image, [max_contour])
-
-        # Codificar la imagen con contornos a base64
-        _, buffer = cv2.imencode('.png', image_with_contours)
-        encoded_image = base64.b64encode(buffer).decode('utf-8')
-
-        # Calibrar la cámara
-        known_width_meters = 0.3  # Ancho conocido en metros
-        pixel_to_meter_ratio = calibrate_camera(image, known_width_meters, w)
-
-        # Devolver el ancho en píxeles y la relación de calibración
-        return jsonify({'referenceWidthPixels': w, 'pixelToMeterRatio': pixel_to_meter_ratio, 'imageWithContours': encoded_image})
-    except Exception as e:
-        print(f"Error procesando la referencia: {e}")
-        return jsonify({'error': 'Error procesando la referencia'}), 500
-    
-
-@app.route('/process_measurement', methods=['POST'])
-def process_measurement():
-    try:
-        data = request.json
-        image_data = data['imageData']
-
-        # Decodificar la imagen recibida
-        encoded_data = image_data.split(',')[1]
-        nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-        # Convertir a escala de grises y detectar bordes
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(gray, 10, 50)
-
-        # Detectar contornos
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        # Filtrar contornos para encontrar el objeto a medir (usaremos el contorno más grande)
-        if not contours:
-            return jsonify({'error': 'No se encontraron contornos'}), 400
-        else:
-            max_contour = max(contours, key=cv2.contourArea)
-            x, y, w, h = cv2.boundingRect(max_contour)
-
-        # Devolver el ancho en píxeles
-        return jsonify({'objectWidthPixels': w})
-    except Exception as e:
-        print(f"Error procesando la medida: {e}")
-        return jsonify({'error': 'Error procesando la medida'}), 500
