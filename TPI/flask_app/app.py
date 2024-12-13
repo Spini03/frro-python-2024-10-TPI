@@ -16,7 +16,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'tu_clave_secreta_muy_segura'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:AriSQL123@127.0.0.1/tpi_soporte'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:root@127.0.0.1/tpi_soporte'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
@@ -43,11 +43,15 @@ class Proyecto(db.Model):
     paredes = db.relationship('Pared', backref='proyecto', lazy=True, cascade="all, delete")
 
 class Material(db.Model):
+    __tablename__ = 'material'
+
     id = db.Column(db.Integer, primary_key=True)
     nombre = db.Column(db.String(255), nullable=False)
     precioPorUnidad = db.Column(db.Float, nullable=False)
 
 class Pared(db.Model):
+    __tablename__ = 'pared'
+
     id = db.Column(db.Integer, primary_key=True)
     altura = db.Column(db.Float, nullable=False)
     ancho = db.Column(db.Float, nullable=False)
@@ -58,6 +62,8 @@ class Pared(db.Model):
     mediciones = db.relationship('HistorialMediciones', backref='pared', lazy=True)
 
 class HistorialMediciones(db.Model):
+    __tablename__ = 'historial_mediciones'
+
     id = db.Column(db.Integer, primary_key=True)
     fechaHora = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     altura = db.Column(db.Float, nullable=False)
@@ -284,39 +290,25 @@ def nuevo_proyecto():
 @app.route('/proyecto/<int:proyecto_id>')
 @requiere_login
 def ver_proyecto(proyecto_id):
-    # Consulta para obtener las mediciones relacionadas con el proyecto
-    mediciones = db.session.execute( text("""
-        SELECT hm.* 
-        FROM historial_mediciones hm 
-        JOIN pared p ON hm.id_pared = p.id 
-        WHERE p.id_proyecto = :proyecto_id
-            """),
-            {'proyecto_id': proyecto_id}
-    ).fetchall()
+    proyecto = Proyecto.query.options(
+        joinedload(Proyecto.paredes).joinedload(Pared.mediciones)
+    ).get_or_404(proyecto_id)
 
-    # Transformar los datos en un formato usable en Jinja
-    mediciones_dict = [
-        {
-            "fecha": m['fechaHora'],
-            "ancho": m['ancho'],
-            "alto": m['altura'],
-            "profundidad": m['profundidad'],
-            "costo_total": m['costoTotal']
-        }
-        for m in mediciones
-    ]
-
-    return render_template(
-        'proyecto_detalle.html',
-        mediciones=mediciones_dict
-    )
-
+    materiales = Material.query.all()
+    
+    # Obtener las mediciones asociadas a las paredes del proyecto
+    mediciones = []
+    for pared in proyecto.paredes:
+        mediciones.extend(pared.mediciones)
+    print(mediciones)
+    return render_template('proyecto_detalle.html', proyecto=proyecto, materiales=materiales, mediciones=mediciones)
 
 @app.route('/guardar_mediciones/<int:proyecto_id>', methods=['POST'])
 @requiere_login
 def guardar_mediciones(proyecto_id):
+   
     # Lógica para guardar mediciones asociadas al proyecto
-    proyecto = Proyecto.query.get_or_404(proyecto_id)
+    Proyecto.query.get_or_404(proyecto_id)
     # (Implementa aquí la lógica específica para guardar las mediciones)
     return redirect(url_for('ver_proyecto', proyecto_id=proyecto_id))
 
