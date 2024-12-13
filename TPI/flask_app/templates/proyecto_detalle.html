@@ -107,34 +107,44 @@
         <div class="mt-4">
             <h3>Mediciones Anteriores</h3>
             <div class="table-responsive">
-                <table>
+                <table class="table">
                     <thead>
                         <tr>
                             <th>Fecha</th>
                             <th>Ancho</th>
                             <th>Alto</th>
                             <th>Profundidad</th>
+                            <th>Materiales</th>
                             <th>Costo Total</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% if mediciones %}
                             {% for medicion in mediciones %}
-                                <tr>
-                                    <td>{{ medicion.fecha }}</td>
-                                    <td>{{ medicion.ancho }}</td>
-                                    <td>{{ medicion.alto }}</td>
-                                    <td>{{ medicion.profundidad }}</td>
-                                    <td>{{ medicion.costo_total }}</td>
-                                </tr>
+                            <tr>   
+                                <td> {{ medicion.fechaHora }}</td>
+                                <td> {{ medicion.ancho }}</td>
+                                <td> {{ medicion.altura }}</td>
+                                <td> {{ medicion.profundidad }}</td>
+                                <td>
+                                    <div style="max-height: 100px; overflow-y: auto;">
+                                        <ul style="list-style-type: none; padding-left: 0;">
+                                            {% for material in materiales %}
+                                                <li>{{ material.nombre }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+                                </td>
+                                <td> {{ medicion.costoTotal }}</td>
+                            </tr>
                             {% endfor %}
                         {% else %}
-                            <tr>
-                                <td colspan="5">No hay mediciones disponibles</td>
+                            <tr> 
+                                <td colspan="5" class="text-center">No hay mediciones para esta pared.</td>
                             </tr>
                         {% endif %}
                     </tbody>
-                </table>                
+                </table>
             </div>
         </div>
     </div>
