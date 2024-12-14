@@ -16,7 +16,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'tu_clave_secreta_muy_segura'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:root@127.0.0.1/tpi_soporte'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://soporte:s0p0rte123*@127.0.0.1/tpi_soporte'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
