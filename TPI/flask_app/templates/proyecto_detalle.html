@@ -127,20 +127,18 @@
                                 <td> {{ medicion.altura }}</td>
                                 <td> {{ medicion.profundidad }}</td>
                                 <td>
-                                    <div style="max-height: 100px; overflow-y: auto;">
-                                        <ul style="list-style-type: none; padding-left: 0;">
-                                            {% for material in materiales %}
-                                                <li>{{ material.nombre }}</li>
-                                            {% endfor %}
-                                        </ul>
-                                    </div>
+                                    {% if medicion.material %}
+                                        {{ medicion.material.nombre }} - ${{ medicion.material.precioPorUnidad }}/m²
+                                    {% else %}
+                                        Sin material especificado
+                                    {% endif %}
                                 </td>
                                 <td> {{ medicion.costoTotal }}</td>
                             </tr>
                             {% endfor %}
                         {% else %}
                             <tr> 
-                                <td colspan="5" class="text-center">No hay mediciones para esta pared.</td>
+                                <td colspan="6" class="text-center">No hay mediciones para esta pared.</td>
                             </tr>
                         {% endif %}
                     </tbody>
@@ -153,7 +151,6 @@
     <script>
         let cv = null;
         let pixelToMeterRatio = null; // Relación entre píxeles y metros
-
         function onOpenCvReady() {
             cv = window.cv;
             if (cv && cv.imread) {
@@ -163,7 +160,6 @@
                 console.error('Error al cargar OpenCV.js');
             }
         }
-
         function initializeApp() {
             const measurementArea = document.getElementById('measurementArea');
             const video = document.getElementById('videoElement');
@@ -180,8 +176,6 @@
             const altoInput = document.getElementById('altoInput');
             const referenceImageContainer = document.getElementById('referenceImageContainer');
             const referenceImage = document.getElementById('referenceImage');
-
-
             const startMeasurementBtn = document.getElementById('startMeasurement');
             if (startMeasurementBtn) {
                 console.log('Botón encontrado. Configurando evento...');
@@ -191,7 +185,6 @@
             } else {
                 console.error('No se encontró el botón con ID "startMeasurement".');
             }
-
             document.addEventListener('DOMContentLoaded', () => {
                 const startMeasurementBtn = document.getElementById('startMeasurement');
                 
@@ -205,21 +198,16 @@
                     alert('El botón fue presionado.');
                 });
             });
-
             let currentMode = 'width';
-
             function drawRuler() {
                 const ctx = rulerCanvas.getContext('2d');
                 if (!ctx) {
                     console.error('Error: No se pudo obtener el contexto 2D del canvas');
                     return;
                 }
-
                 ctx.clearRect(0, 0, rulerCanvas.width, rulerCanvas.height); // Limpia el canvas
-
                 ctx.beginPath();
                 ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
-
                 if (currentMode === 'width') {
                     ctx.lineWidth = 2;
                     ctx.moveTo(0, rulerCanvas.height / 2);
@@ -229,39 +217,30 @@
                     ctx.moveTo(rulerCanvas.width / 2, 0);
                     ctx.lineTo(rulerCanvas.width / 2, rulerCanvas.height);
                 }
-
                 ctx.stroke();
             }
-
             function positionRuler() {
                 rulerCanvas.width = video.videoWidth;
                 rulerCanvas.height = video.videoHeight;
                 drawRuler();
             }
-
             function calculatePixelToMeterRatio(referenceWidthPixels, knowWidthMeters) {
                 return knowWidthMeters / referenceWidthPixels;
             }
-
             let referenceContourDetected = false;
             let referenceContour = null;
-
             function detectReferenceContour(src) {
                 const gray = new cv.Mat();
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-
                 const edges = new cv.Mat();
                 cv.Canny(gray, edges, 10, 50);
-
                 const contours = new cv.MatVector();
                 const hierarchy = new cv.Mat();
                 cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
                 // Find contours with a specific area range (to filter out tiny or extremely large contours)
                 const validContours = [];
                 const minArea = 500; // Adjust based on the actual size of the reference object
                 const maxArea = video.videoWidth * video.videoHeight * 0.8; // Adjust percentage as needed
-
                 for (let i = 0; i < contours.size(); i++) {
                     const contour = contours.get(i);
                     const area = cv.contourArea(contour);
@@ -269,7 +248,6 @@
                         validContours.push(contour);
                     }
                 }
-
                 // If we have valid contours, highlight the largest one
                 if (validContours.length > 0) {
                     referenceContour = validContours.reduce((largest, current) => 
@@ -278,42 +256,33 @@
                     referenceContourDetected = true;
                     return true;
                 }
-
                 referenceContourDetected = false;
                 return false;
             }
-
             function drawReferenceContour() {
                 if (!referenceContour) return;
-
                 const canvas = document.createElement('canvas');
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
                 const src = cv.imread(canvas);
                 const contourCanvas = document.createElement('canvas');
                 contourCanvas.width = video.videoWidth;
                 contourCanvas.height = video.videoHeight;
                 const contourCtx = contourCanvas.getContext('2d');
                 contourCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
                 const color = new cv.Scalar(0, 255, 0); // Green color for reference contour
                 cv.drawContours(src, new cv.MatVector([referenceContour]), 0, color, 3);
-
                 // Convert OpenCV Mat to canvas
                 cv.imshow(contourCanvas, src);
-
                 // Update the rulerCanvas with the contour
                 const rulerCtx = rulerCanvas.getContext('2d');
                 rulerCtx.clearRect(0, 0, rulerCanvas.width, rulerCanvas.height);
                 rulerCtx.drawImage(contourCanvas, 0, 0);
-
                 // Clean up
                 src.delete();
             }
-
             // Modify the contour detection interval to focus on reference detection
             video.addEventListener('play', () => {
                 const fps = 30;
@@ -322,18 +291,14 @@
                 
                 const contourInterval = setInterval(() => {
                     if (captureReferenceBtn.style.display !== 'none') {
-
                         referenceContourDetected = false;
                         referenceContour = null;
-
                         const canvas = document.createElement('canvas');
                         canvas.width = video.videoWidth;
                         canvas.height = video.videoHeight;
                         const ctx = canvas.getContext('2d');
                         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
                         const src = cv.imread(canvas);
-
                          // Mejorar la detección de contornos
                         const gray = new cv.Mat();
                         cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
@@ -345,11 +310,9 @@
                         // Umbralización adaptativa
                         const thresh = new cv.Mat();
                         cv.adaptiveThreshold(blurred, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
-
                         const contours = new cv.MatVector();
                         const hierarchy = new cv.Mat();
                         cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
                         // Filtrar contornos por área y forma
                         const validContours = [];
                         for (let i = 0; i < contours.size(); i++) {
@@ -358,7 +321,6 @@
                             const perimeter = cv.arcLength(contour, true);
                             const approxPolyDP = new cv.Mat();
                             cv.approxPolyDP(contour, approxPolyDP, 0.04 * perimeter, true);
-
                             // Filtrar por área y número de vértices (para detectar formas cuadradas/rectangulares)
                             if (area > 500 && area < video.videoWidth * video.videoHeight * 0.5 && 
                                 approxPolyDP.rows === 4) {
@@ -366,7 +328,6 @@
                             }
                             approxPolyDP.delete();
                         }
-
                         // Dibujar los contornos válidos
                         if (validContours.length > 0) {
                             const resultCanvas = document.createElement('canvas');
@@ -374,15 +335,12 @@
                             resultCanvas.height = video.videoHeight;
                             const resultCtx = resultCanvas.getContext('2d');
                             resultCtx.drawImage(video, 0, 0, resultCanvas.width, resultCanvas.height);
-
                             const color = new cv.Scalar(0, 255, 0); // Verde para contornos válidos
                             validContours.forEach(contour => {
                                 cv.drawContours(src, new cv.MatVector([contour]), 0, color, 3);
                             });
-
                             cv.imshow(rulerCanvas, src);
                         }
-
                         // Limpiar memoria
                         gray.delete();
                         blurred.delete();
@@ -390,46 +348,37 @@
                         contours.delete();
                         hierarchy.delete();
                         src.delete();
-
                         /* viejo
                         detectReferenceContour(src);
                         
                         if (referenceContourDetected) {
                             drawReferenceContour();
                         }
-
                         src.delete(); */
                     }
                 }, interval); 
             });
-
             // Capturar la medida de la regla de referencia
             captureReferenceBtn.addEventListener('click', () => {
                 console.log('Intentando capturar referencia...');
-
                 // Restablecer el estado antes de intentar detectar el contorno de referencia
                 referenceContourDetected = false;
                 referenceContour = null;
-
                 // Ocultar el rulerCanvas durante la captura de referencia
                 rulerCanvas.style.display = 'none';
-
                 const canvas = document.createElement('canvas');
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
                 const src = cv.imread(canvas);
                 detectReferenceContour(src);
-
                 if (!referenceContourDetected) {
                     console.log('No se detectó un objeto de referencia válido.');
                     alert('No se detectó un objeto de referencia válido. Intente de nuevo.');
                     src.delete();
                     return;
                 }
-
                 // Enviar imagen de la regla de referencia al servidor
                 const imageData = canvas.toDataURL('image/png');
                 fetch('/proyecto/{{ proyecto.id }}/process_reference', {
@@ -454,15 +403,12 @@
                         alert('Referencia capturada. Ahora puedes medir.');
                         captureReferenceBtn.style.display = 'none';
                         captureWidthBtn.style.display = 'block';
-
                         // Mostrar la imagen con contornos
                         referenceImage.src = `data:image/png;base64,${data.imageWithContours}`;
                         referenceImageContainer.style.display = 'block';
-
                         // Preparar para modo de ancho
                         currentMode = 'width';
                         measurementInstructions.textContent = "Alinee la regla horizontal con el ancho de la pared";
-
                         // Mostrar la regla horizontal para medir el ancho
                         rulerCanvas.style.display = 'block';
                         drawRuler();
@@ -474,18 +420,14 @@
                     // Asegurarse de que el botón siga siendo interactivo
                     captureReferenceBtn.disabled = false;
                 });
-
                 src.delete();
             });
-
-
             function measureObject() {
                 const canvas = document.createElement('canvas');
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
                 const imageData = canvas.toDataURL('image/png');
                 fetch('/process_measurement', {
                     method: 'POST',
@@ -505,7 +447,6 @@
                 })
                 .catch(err => console.error('Error:', err));
             }
-
             function calculateMeasurementInMeters(pixelMeasurement) {
                 if (!pixelToMeterRatio) {
                     alert('Primero debes capturar la referencia.');
@@ -513,7 +454,6 @@
                 }
                 return (pixelMeasurement * pixelToMeterRatio).toFixed(2);
             }
-
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 alert('getUserMedia no es soportado en este navegador.');
             } else {
@@ -528,7 +468,6 @@
                         video.style.display = 'block';
                         document.getElementById('measurementControls').style.display = 'block';
                         startMeasurementBtn.style.display = 'none';
-
                         // Posicionar la regla después de que el video esté visible
                         video.onloadedmetadata = () => {
                             console.log('Video cargado, inicializando regla...');
@@ -544,17 +483,13 @@
                     }
                 });
             }
-
             captureWidthBtn.addEventListener("click", async () => {
-
                 rulerCanvas.style.display = 'block';
                 drawRuler();
-
                 try {
                     const measurements = await calculateMeasurement();
                     widthValue.textContent = measurements.width;
                     anchoInput.value = measurements.width;
-
                     // Cambiar a modo de altura
                     currentMode = "height";
                     ruler.classList.remove("ruler-horizontal");
@@ -563,7 +498,6 @@
                         "Alinee la regla vertical con el alto de la pared";
                     captureWidthBtn.style.display = "none";
                     captureHeightBtn.style.display = "block";
-
                     // Reposicionar la regla
                     positionRuler();
                 } catch (error) {
@@ -571,13 +505,11 @@
                     alert("Error al calcular el ancho: " + error);
                 }
             });
-
             captureHeightBtn.addEventListener("click", async () => {
                 try {
                     const measurements = await calculateMeasurement();
                     heightValue.textContent = measurements.height;
                     altoInput.value = measurements.height;
-
                     // Mostrar formulario de mediciones
                     measurementForm.style.display = "block";
                     video.style.display = "none";
@@ -589,7 +521,6 @@
                     alert("Error al calcular la altura: " + error);
                 }
             });
-
             async function calculateMeasurement() {
                 return new Promise((resolve, reject) => {
                     // Esperar a que OpenCV esté cargado
@@ -597,31 +528,25 @@
                         reject("OpenCV.js no está cargado");
                         return;
                     }
-
                     // Capturar el frame actual del video
                     const canvas = document.createElement("canvas");
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
                     const ctx = canvas.getContext("2d");
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
                     // Convertir el canvas en un objeto Mat de OpenCV
                     const src = cv.imread(canvas);
-
                     try {
                         // Preprocesamiento: convertir a escala de grises
                         const gray = new cv.Mat();
                         cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-
                         // Aplicar detección de bordes (Canny)
                         const edges = new cv.Mat();
                         cv.Canny(gray, edges, 10, 50); 
-
                         // Detectar contornos
                         const contours = new cv.MatVector();
                         const hierarchy = new cv.Mat();
                         cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
                         // Filtrar el contorno más grande (supongamos que es el de la pared)
                         let largestContour = null;
                         let maxArea = 0;
@@ -633,32 +558,26 @@
                                 largestContour = contour;
                             }
                         }
-
                         if (!largestContour) {
                             reject("No se detectaron contornos significativos.");
                             return;
                         }
-
                         // Calcular el bounding box del contorno
                         const boundingRect = cv.boundingRect(largestContour);
-
                         // Extraer las dimensiones
                         const widthPixels = boundingRect.width;
                         const heightPixels = boundingRect.height;
-
                         // Conversión de píxeles a metros
                         // Suponemos que tienes una referencia conocida de la regla en el video
                         const pixelToMeterRatio = 0.01; // Ajusta según la escala real
                         const widthMeters = (widthPixels * pixelToMeterRatio).toFixed(2);
                         const heightMeters = (heightPixels * pixelToMeterRatio).toFixed(2);
-
                         // Limpiar memoria
                         gray.delete();
                         edges.delete();
                         contours.delete();
                         hierarchy.delete();
                         src.delete();
-
                         // Retornar las medidas
                         resolve({
                             width: widthMeters,
@@ -669,45 +588,37 @@
                     }
                 });
             }
-
             function showContours() {
                 const canvas = document.createElement("canvas");
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 const ctx = canvas.getContext("2d");
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
                 const src = cv.imread(canvas);
                 const gray = new cv.Mat();
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
                 const edges = new cv.Mat();
                 cv.Canny(gray, edges, 10, 50);
-
                 const contours = new cv.MatVector();
                 const hierarchy = new cv.Mat();
                 cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
                 const contourCanvas = document.createElement("canvas");
                 contourCanvas.width = video.videoWidth;
                 contourCanvas.height = video.videoHeight;
                 const contourCtx = contourCanvas.getContext("2d");
                 contourCtx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
                 for (let i = 0; i < contours.size(); i++) {
                     const contour = contours.get(i);
                     const color = new cv.Scalar(0, 0, 255); // Rojo
                     cv.drawContours(contourCanvas, contours, i, color, 2);
                 }
-
                 rulerCanvas.getContext("2d").drawImage(contourCanvas, 0, 0);
-
                 gray.delete();
                 edges.delete();
                 contours.delete();
                 hierarchy.delete();
                 src.delete();
             }
-
             // Cambiar el texto de instrucciones
             /*captureReferenceBtn.addEventListener('click', () => {
                 measurementInstructions.textContent = "Alinee la regla horizontal con el ancho de la pared";
@@ -715,14 +626,12 @@
                 ruler.style.display = 'none';
                 showContours();
             });*/
-
             // Actualizar contornos en cada frame
             video.addEventListener('play', () => {
                 const fps = 30;
                 const interval = 1000 / fps;
                 setInterval(showContours, interval);
             });
-
         }
     </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>

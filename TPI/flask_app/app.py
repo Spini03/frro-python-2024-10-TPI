@@ -16,14 +16,12 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'tu_clave_secreta_muy_segura'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://soporte:s0p0rte123*@127.0.0.1/tpi_soporte'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://soporte:s0p0rte123*@localhost/tpi_soporte'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 
-# Modelos de base de datos
-from models import Usuario, Proyecto, Pared, Material, HistorialMediciones
 
 if __name__ == '__main__':
     app.run(debug=True)
@@ -291,26 +289,128 @@ def nuevo_proyecto():
 @requiere_login
 def ver_proyecto(proyecto_id):
     proyecto = Proyecto.query.options(
-        joinedload(Proyecto.paredes).joinedload(Pared.mediciones)
+        joinedload(Proyecto.paredes).joinedload(Pared.mediciones).joinedload(HistorialMediciones.material)
     ).get_or_404(proyecto_id)
 
+    # Obtener las mediciones directamente con sus materiales ya cargados
+    mediciones = [medicion for pared in proyecto.paredes for medicion in pared.mediciones]
+    
     materiales = Material.query.all()
     
-    # Obtener las mediciones asociadas a las paredes del proyecto
-    mediciones = []
-    for pared in proyecto.paredes:
-        mediciones.extend(pared.mediciones)
-    print(mediciones)
-    return render_template('proyecto_detalle.html', proyecto=proyecto, materiales=materiales, mediciones=mediciones)
+    return render_template('proyecto_detalle.html', 
+                           proyecto=proyecto, 
+                           materiales=materiales, 
+                           mediciones=mediciones)
 
-@app.route('/guardar_mediciones/<int:proyecto_id>', methods=['POST'])
+@app.route('/proyecto/<int:proyecto_id>/guardar_mediciones', methods=['POST'])
 @requiere_login
 def guardar_mediciones(proyecto_id):
-   
-    # Lógica para guardar mediciones asociadas al proyecto
-    Proyecto.query.get_or_404(proyecto_id)
-    # (Implementa aquí la lógica específica para guardar las mediciones)
+    proyecto = Proyecto.query.get_or_404(proyecto_id)
+    
+    print(request.form)  # Imprime los datos del formulario en la consola
+    
+    try:
+        ancho = float(request.form['ancho'])
+        alto = float(request.form['alto'])
+        profundidad = float(request.form['profundidad'])
+        material_id = int(request.form['material'])
+        
+        material = Material.query.get_or_404(material_id)
+        
+        # Crear una nueva pared
+        nueva_pared = Pared(
+            altura=alto,
+            ancho=ancho,
+            profundidad=profundidad,  # Asegúrate de que este campo exista en la tabla Pared
+            id_proyecto=proyecto_id,
+            id_material=material_id
+        )
+        
+        db.session.add(nueva_pared)
+        db.session.flush()  # Flush para obtener el ID de la nueva pared
+        
+        # Calcular costo total
+        area_total = 2 * (ancho * alto + ancho * profundidad + alto * profundidad)  # Área total de la pared
+        costo_total = area_total * material.precioPorUnidad
+        
+        # Crear una nueva medición asociada a la nueva pared
+        nueva_medicion = HistorialMediciones(
+            altura=alto,
+            ancho=ancho,
+            profundidad=profundidad,
+            costoTotal=costo_total,
+            id_pared=nueva_pared.id,
+            material_id=material_id
+        )
+        
+        db.session.add(nueva_medicion)
+        db.session.commit()
+        flash('Mediciones guardadas exitosamente')
+    except Exception as e:
+        db.session.rollback()
+        flash('Error al guardar las mediciones: ' + str(e))
+    
+    print("Redirigiendo a ver_proyecto")  # Imprime un mensaje en la consola
     return redirect(url_for('ver_proyecto', proyecto_id=proyecto_id))
 
-# Otros métodos se omiten para mantener el código más limpio y conciso
 
+@app.route('/proyecto/<int:proyecto_id>/process_reference', methods=['POST'])
+def process_reference(proyecto_id):
+    try:
+        data = request.json
+        image_data = data['imageData']
+        # Decodificar la imagen recibida
+        encoded_data = image_data.split(',')[1]
+        nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        # Convertir a escala de grises y detectar bordes
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 10, 50)
+        # Detectar contornos
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Filtrar contornos para encontrar la regla (supongo que la regla es el contorno más largo)
+        if not contours:
+            return jsonify({'error': 'No se encontraron contornos'}), 400
+        else:
+            max_contour = max(contours, key=cv2.contourArea)
+            x, y, w, h = cv2.boundingRect(max_contour)
+        # Dibujar contornos en la imagen
+        image_with_contours = draw_contours(image, [max_contour])
+        # Codificar la imagen con contornos a base64
+        _, buffer = cv2.imencode('.png', image_with_contours)
+        encoded_image = base64.b64encode(buffer).decode('utf-8')
+        # Calibrar la cámara
+        known_width_meters = 0.3  # Ancho conocido en metros
+        pixel_to_meter_ratio = calibrate_camera(image, known_width_meters, w)
+        # Devolver el ancho en píxeles y la relación de calibración
+        return jsonify({'referenceWidthPixels': w, 'pixelToMeterRatio': pixel_to_meter_ratio, 'imageWithContours': encoded_image})
+    except Exception as e:
+        print(f"Error procesando la referencia: {e}")
+        return jsonify({'error': 'Error procesando la referencia'}), 500
+    
+@app.route('/process_measurement', methods=['POST'])
+def process_measurement():
+    try:
+        data = request.json
+        image_data = data['imageData']
+        # Decodificar la imagen recibida
+        encoded_data = image_data.split(',')[1]
+        nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        # Convertir a escala de grises y detectar bordes
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 10, 50)
+        # Detectar contornos
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Filtrar contornos para encontrar el objeto a medir (usaremos el contorno más grande)
+        if not contours:
+            return jsonify({'error': 'No se encontraron contornos'}), 400
+        else:
+            max_contour = max(contours, key=cv2.contourArea)
+            x, y, w, h = cv2.boundingRect(max_contour)
+        # Devolver el ancho en píxeles
+        return jsonify({'objectWidthPixels': w})
+    except Exception as e:
+        print(f"Error procesando la medida: {e}")
+        return jsonify({'error': 'Error procesando la medida'}), 500
